@@ -1,0 +1,75 @@
+# MysticCraft configuration
+# All values are balance knobs - tune freely for your server.
+
+general:
+  allow-race-switching: true
+  switch-cooldown-hours: 168 # 1 week between voluntary race changes
+  starting-race: HUMAN
+  announce-turnings: true
+
+vampire:
+  speed-amplifier: 1          # Speed II while daylight-ring active or humanity high
+  strength-amplifier: 1       # Attack damage bonus level
+  sunlight-damage-per-second: 4.0
+  sunlight-grace-period-ticks: 60   # time before burning starts after entering sunlight
+  blood-heal-hearts: 4.0
+  blood-humanity-cost: 2
+  vervain-damage: 6.0
+  vervain-weaken-seconds: 8
+  compulsion-cooldown-seconds: 90
+  compulsion-range: 5.0
+  compulsion-requires-eye-contact: true
+  stake-instakill: true
+  fire-instakill: true
+  decapitation-instakill: true
+  humanity:
+    max: 100
+    start: 100
+    low-threshold: 30       # below this = "ripper" mode buffs but random rage triggers
+    ripper-rage-chance-percent: 5
+
+werewolf:
+  strength-amplifier: 2
+  speed-amplifier: 1
+  regen-amplifier: 1
+  wolfsbane-damage: 8.0
+  wolfsbane-weaken-seconds: 15
+  silver-bonus-damage: 6.0
+  bite-toxin-vampire-damage-per-second: 3.0
+  bite-toxin-duration-seconds: 60
+  forced-shift-on-full-moon: true
+  full-moon-check-interval-ticks: 1200
+  first-shift-trauma: true
+
+witch:
+  spellcasting-requires-herb: true
+  channeling-nearby-witch-bonus-percent: 25
+  channeling-radius: 15
+  spell-cooldown-seconds: 20
+  overchannel-backlash-chance-percent: 20
+  overchannel-backlash-damage: 6.0
+
+items:
+  daylight-ring-name: "Daylight Ring"
+  daylight-ring-material: GOLD_NUGGET
+  wolfsbane-material: WITHER_ROSE
+  vervain-material: SPORE_BLOSSOM
+  silver-weapon-material: IRON_SWORD
+  stake-material: STICK
+  witch-herb-material: NETHER_WART
+  witch-wand-material: BLAZE_ROD
+
+# Only used if a "Factions" plugin (e.g. SaberFactions) is detected on the server.
+# If it's missing, or the API doesn't match, this bridge disables itself and
+# logs a warning - the rest of MysticCraft works fine either way.
+factions-bridge:
+  auto-assign-faction-on-turn: true       # turning a player moves them into their race's faction
+  lock-faction-membership-by-race: true   # /f join is blocked into a race-locked faction if race doesn't match
+  race-factions:
+    VAMPIRE: "Vampires"
+    WEREWOLF: "Werewolves"
+    WITCH: "Witches"
+    # Leave a race out of this map (or blank) to not lock/auto-assign it.
+  majority-bonus:
+    enabled: true
+    threshold-percent: 70   # % of a faction's online members that must share a race to trigger the bonus

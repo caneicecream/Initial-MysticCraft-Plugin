@@ -1,0 +1,32 @@
+name: MysticCraft
+version: '1.0.0'
+main: com.canopycreations.mysticcraft.MysticCraft
+api-version: '1.21'
+author: CanopyCreations
+description: Vampire Diaries-inspired supernatural races - Vampires, Werewolves, Witches
+softdepend: [Factions]
+
+commands:
+  race:
+    description: View or manage your supernatural race
+    usage: /race [set|info|humanity|list]
+  vampire:
+    description: Vampire ability commands
+    usage: /vampire <compel|feed|toggle>
+  werewolf:
+    description: Werewolf ability commands
+    usage: /werewolf <shift|info>
+  witch:
+    description: Witch spellcasting commands
+    usage: /witch <cast|list> [spell]
+  mystic:
+    description: Admin commands for MysticCraft
+    usage: /mystic <reload|setrace|humanity|moon>
+
+permissions:
+  mysticcraft.admin:
+    description: Access to MysticCraft admin commands
+    default: op
+  mysticcraft.play:
+    description: Access to race abilities
+    default: true
