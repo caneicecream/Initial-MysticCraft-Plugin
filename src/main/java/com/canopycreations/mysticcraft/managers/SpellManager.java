@@ -113,7 +113,7 @@ public class SpellManager {
     }
 
     private void castHeal(Player witch, double power) {
-        double maxHealth = witch.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
+        double maxHealth = witch.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
         witch.setHealth(Math.min(maxHealth, witch.getHealth() + 6.0 * power));
         witch.sendMessage("§aYou channel restorative magic through yourself.");
     }

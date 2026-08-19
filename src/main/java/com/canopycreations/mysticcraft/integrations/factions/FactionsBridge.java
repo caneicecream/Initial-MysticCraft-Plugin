@@ -89,7 +89,9 @@ public class FactionsBridge implements Listener {
             FPlayer fplayer = FPlayers.getInstance().getByPlayer(event.getPlayer());
             if (fplayer == null) return;
 
-            fplayer.setFaction(target);
+            // Second argument varies by SaberFactions build (commonly a "silent"/"auto" flag).
+            // false = behave like a normal join (fires the usual join messaging/side-effects).
+            fplayer.setFaction(target, false);
             event.getPlayer().sendMessage("§7[§dMysticCraft§7] You've been moved into the §f" + target.getTag()
                     + "§7 faction to match your new race.");
         } catch (Exception e) {
@@ -111,7 +113,12 @@ public class FactionsBridge implements Listener {
             Race requiredRace = factionTagToRace.get(tag.toLowerCase());
             if (requiredRace == null) return; // not a race-locked faction
 
-            Player player = Bukkit.getPlayer(event.getFPlayer().getPlayer().getUniqueId());
+            // FPlayerJoinEvent's accessor for the joining FPlayer varies across SaberFactions
+            // builds (getFPlayer/getFplayer/etc.), but FPlayer instances are guaranteed to be
+            // the same object per player (docs: "you can use the == operator"), so we can
+            // resolve the Bukkit Player by matching identity against online players instead
+            // of relying on a specific accessor name.
+            Player player = resolvePlayerFromJoinEvent(event);
             if (player == null) return;
 
             Race playerRace = plugin.getRaceManager().getRace(player);
@@ -124,6 +131,47 @@ public class FactionsBridge implements Listener {
             plugin.getLogger().log(Level.WARNING, "[FactionsBridge] Failed to enforce race lock on faction join - "
                     + "the installed Factions build may use a slightly different API.", e);
         }
+    }
+
+    /**
+     * Tries a handful of known getter-name variants for pulling the FPlayer off
+     * FPlayerJoinEvent, then matches it against online players by identity
+     * (FPlayer instances are 1-per-player and stable, per the classic API docs).
+     * This avoids the whole bridge breaking again if this build renamed the
+     * accessor yet again.
+     */
+    private Player resolvePlayerFromJoinEvent(FPlayerJoinEvent event) {
+        FPlayer joiningFPlayer = null;
+        for (String methodName : new String[]{"getFPlayer", "getFplayer", "getPlayer", "getFPlayerJoining"}) {
+            try {
+                java.lang.reflect.Method m = event.getClass().getMethod(methodName);
+                Object result = m.invoke(event);
+                if (result instanceof FPlayer fp) {
+                    joiningFPlayer = fp;
+                    break;
+                }
+            } catch (Exception ignored) {
+                // try the next candidate name
+            }
+        }
+        if (joiningFPlayer == null) {
+            try {
+                java.lang.reflect.Field f = event.getClass().getDeclaredField("fplayer");
+                f.setAccessible(true);
+                Object result = f.get(event);
+                if (result instanceof FPlayer fp) joiningFPlayer = fp;
+            } catch (Exception ignored) {
+                // give up - bridge just won't enforce this particular check
+            }
+        }
+        if (joiningFPlayer == null) return null;
+
+        for (Player candidate : Bukkit.getOnlinePlayers()) {
+            if (FPlayers.getInstance().getByPlayer(candidate) == joiningFPlayer) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     // ---------------------------------------------------------------

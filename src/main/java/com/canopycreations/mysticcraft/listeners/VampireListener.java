@@ -118,7 +118,7 @@ public class VampireListener implements Listener {
         double healHearts = plugin.getConfig().getDouble("vampire.blood-heal-hearts", 4.0);
         int humanityCost = plugin.getConfig().getInt("vampire.blood-humanity-cost", 2);
 
-        double maxHealth = vampire.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
+        double maxHealth = vampire.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
         vampire.setHealth(Math.min(maxHealth, vampire.getHealth() + healHearts * 2));
         vampire.getWorld().playSound(vampire.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1f, 0.6f);
         vampire.sendMessage("§4You feed, and feel the strength return to you.");

@@ -83,8 +83,8 @@ public class RaceManager {
         PlayerData data = getData(player);
         Race race = data.getRace();
 
-        AttributeInstance speedAttr = player.getAttribute(Attribute.MOVEMENT_SPEED);
-        AttributeInstance damageAttr = player.getAttribute(Attribute.ATTACK_DAMAGE);
+        AttributeInstance speedAttr = player.getAttribute(Attribute.GENERIC_MOVEMENT_SPEED);
+        AttributeInstance damageAttr = player.getAttribute(Attribute.GENERIC_ATTACK_DAMAGE);
 
         // Reset to vanilla baselines first
         double baseSpeed = 0.1;
