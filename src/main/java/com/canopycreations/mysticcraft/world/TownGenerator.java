@@ -809,6 +809,19 @@ public class TownGenerator {
         bp.weather(x, y, z, plot.width(), plot.depth(), 6, 0.06);
     }
 
+    /**
+     * Material palettes for residential houses. Varied enough that a street
+     * isn't monotonous, narrow enough that they read as the same town.
+     * Downtown uses its own separate set - see downtownShop().
+     */
+    private static final Material[][] PALETTES = {
+            {Material.SPRUCE_PLANKS,          Material.SPRUCE_LOG, Material.SPRUCE_STAIRS,   Material.DEEPSLATE_TILES},
+            {Material.OAK_PLANKS,             Material.OAK_LOG,    Material.OAK_STAIRS,      Material.DEEPSLATE_TILES},
+            {Material.DARK_OAK_PLANKS,        Material.DARK_OAK_LOG, Material.DARK_OAK_STAIRS, Material.DEEPSLATE_BRICKS},
+            {Material.STRIPPED_SPRUCE_WOOD,   Material.SPRUCE_LOG, Material.SPRUCE_STAIRS,   Material.TUFF_BRICKS},
+            {Material.WHITE_TERRACOTTA,       Material.OAK_LOG,    Material.OAK_STAIRS,      Material.DEEPSLATE_TILES}
+    };
+
     private void fillerHouse(World world, Blueprint bp, Random rng, Location at, TownPlan.Plot plot) {
         int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
         Material[] palette = PALETTES[rng.nextInt(PALETTES.length)];
