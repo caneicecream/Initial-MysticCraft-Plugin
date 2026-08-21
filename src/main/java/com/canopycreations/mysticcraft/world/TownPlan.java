@@ -129,12 +129,23 @@ public class TownPlan {
                 case OUTSKIRTS -> 14;
             };
 
+            // A plot's coordinate is the building's CENTRE. To keep the
+            // building's front wall `setback` blocks clear of the road, the
+            // centre has to sit that far out PLUS the building's own
+            // half-depth. Getting this wrong put every plot on top of the
+            // street and made every placement fail.
+            int typicalDepth = switch (d) {
+                case DOWNTOWN -> 7;
+                case RESIDENTIAL -> 7;
+                case OUTSKIRTS -> 10;
+            };
+
             int steps = s.length() / spacing;
             for (int i = 1; i < steps; i++) {
                 double t = (double) i / steps;
                 int px = (int) Math.round(s.x1() + (s.x2() - s.x1()) * t);
                 int pz = (int) Math.round(s.z1() + (s.z2() - s.z1()) * t);
-                int offset = s.width() + setback;
+                int offset = s.width() + setback + typicalDepth;
 
                 if (s.isVertical()) {
                     addPlot(px + offset, pz, Facing.WEST);

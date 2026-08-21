@@ -58,9 +58,21 @@ public class Occupancy {
                 Math.max(minX, maxX), Math.max(minZ, maxZ), owner));
     }
 
-    /** Reserves the full run of a street, including its verges. */
+    /**
+     * Reserves a street's road surface.
+     *
+     * Only the carriageway itself - padding this out further was what pushed
+     * the reservation into the building plots and blocked the whole town from
+     * generating.
+     */
     public void reserveStreet(TownPlan.Street s) {
-        int pad = s.width() + 1;
+        int pad = s.width();
+        boolean axisAligned = s.x1() == s.x2() || s.z1() == s.z2();
+        if (!axisAligned) {
+            // A diagonal's bounding box would reserve an enormous square of
+            // land it doesn't actually occupy. Leave those unreserved.
+            return;
+        }
         reserveUnchecked(
                 Math.min(s.x1(), s.x2()) - pad, Math.min(s.z1(), s.z2()) - pad,
                 Math.max(s.x1(), s.x2()) + pad, Math.max(s.z1(), s.z2()) + pad,

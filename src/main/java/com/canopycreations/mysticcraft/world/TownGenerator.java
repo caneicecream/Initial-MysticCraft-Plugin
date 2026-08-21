@@ -243,6 +243,7 @@ public class TownGenerator {
                     if (feedback != null) {
                         feedback.sendMessage("");
                         feedback.sendMessage("§aAshfall stands. §8seed: §7" + seed);
+                        feedback.sendMessage("§8" + occ.count() + " structures placed.");
                         feedback.sendMessage("§8Re-roll elsewhere with §7/mystic town confirm <seed>§8,");
                         feedback.sendMessage("§8or re-point landmarks onto your own builds with");
                         feedback.sendMessage("§8§7/mystic landmark set <name>§8.");
@@ -251,7 +252,23 @@ public class TownGenerator {
                     cancel();
                     return;
                 }
-                stages.get(index).run();
+
+                // A BukkitRunnable that throws gets cancelled outright, which
+                // would silently abandon every remaining stage. Isolating each
+                // one means a single failure costs you that structure, not the
+                // rest of the town.
+                try {
+                    stages.get(index).run();
+                } catch (Throwable t) {
+                    String what = index < labels.size() ? labels.get(index) : "stage " + index;
+                    plugin.getLogger().log(java.util.logging.Level.WARNING,
+                            "Ashfall generation: stage failed (" + what + ") - continuing.", t);
+                    if (feedback != null) {
+                        feedback.sendMessage("§cA stage failed: §7" + what
+                                + "§c. Continuing; see console for details.");
+                    }
+                }
+
                 if (feedback != null && index < labels.size()) {
                     feedback.sendActionBar("§8Building Ashfall... " + labels.get(index));
                 }
@@ -273,8 +290,9 @@ public class TownGenerator {
 
             int hw = plot.width() - 1, hl = plot.depth() - 1;
             if (!Occupancy.isBuildable(world, plot.x(), plot.z(), hw, hl, 5)) continue;
-            // Landmarks get a wide berth so they read as important.
-            if (!occ.reserve(plot.x(), plot.z(), hw + 3, hl + 3, 4, owner)) continue;
+            // A modest berth so landmarks read as important without
+            // starving the surrounding streets of buildable plots.
+            if (!occ.reserve(plot.x(), plot.z(), hw + 1, hl + 1, 2, owner)) continue;
             return plot;
         }
         return null;
