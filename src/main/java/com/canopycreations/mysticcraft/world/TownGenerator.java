@@ -73,6 +73,7 @@ public class TownGenerator {
         Random rng = new Random(seed);
         Blueprint bp = new Blueprint(world, rng);
         TownPlan plan = new TownPlan(center.getBlockX(), center.getBlockZ(), rng);
+        Occupancy occ = new Occupancy();
 
         List<Runnable> stages = new ArrayList<>();
         List<String> labels = new ArrayList<>();
@@ -91,6 +92,7 @@ public class TownGenerator {
         // --- Stage 1: the street network. Everything else hangs off this. ---
         stages.add(() -> {
             for (TownPlan.Street st : plan.getStreets()) {
+                occ.reserveStreet(st);
                 bp.road(st.x1(), st.z1(), st.x2(), st.z2(),
                         st.width(),
                         st.major() ? Material.DIRT_PATH : Material.COARSE_DIRT,
@@ -103,6 +105,7 @@ public class TownGenerator {
         stages.add(() -> {
             Location spot = center.clone();
             spot.setY(Blueprint.groundY(world, spot.getBlockX(), spot.getBlockZ()));
+            occ.reserve(spot.getBlockX(), spot.getBlockZ(), 22, 22, 0, "square");
             bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), 26);
             square(world, bp, rng, spot.getBlockX(), spot.getBlockY(), spot.getBlockZ());
             plugin.getLandmarkManager().setLocation(Landmark.TOWN_SQUARE, spot, 34);
@@ -112,12 +115,13 @@ public class TownGenerator {
         // --- Stage 3a: downtown landmarks ---
         for (Landmark landmark : DOWNTOWN_LANDMARKS) {
             stages.add(() -> {
-                TownPlan.Plot plot = plan.takePlot(TownPlan.District.DOWNTOWN, 4, 5);
-                if (plot == null) plot = plan.takeAnyPlot();
+                TownPlan.Plot plot = takeBuildablePlot(plan, occ, world,
+                        TownPlan.District.DOWNTOWN, 4, 5, landmark.name());
                 if (plot == null) return;
 
                 Location spot = new Location(world, plot.x(), 0, plot.z());
-                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
+                spot.setY(Occupancy.averageGround(world, plot.x(), plot.z(),
+                        plot.width(), plot.depth()));
                 try {
                     bp.clearVegetation(plot.x(), plot.z(), clearRadiusFor(landmark));
                     buildOnPlot(world, bp, rng, spot, landmark, plot);
@@ -132,12 +136,13 @@ public class TownGenerator {
         // --- Stage 3b: the big residential houses ---
         for (Landmark landmark : RESIDENTIAL_LANDMARKS) {
             stages.add(() -> {
-                TownPlan.Plot plot = plan.takePlot(TownPlan.District.RESIDENTIAL, 5, 5);
-                if (plot == null) plot = plan.takeAnyPlot();
+                TownPlan.Plot plot = takeBuildablePlot(plan, occ, world,
+                        TownPlan.District.RESIDENTIAL, 5, 5, landmark.name());
                 if (plot == null) return;
 
                 Location spot = new Location(world, plot.x(), 0, plot.z());
-                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
+                spot.setY(Occupancy.averageGround(world, plot.x(), plot.z(),
+                        plot.width(), plot.depth()));
                 try {
                     bp.clearVegetation(plot.x(), plot.z(), clearRadiusFor(landmark));
                     buildOnPlot(world, bp, rng, spot, landmark, plot);
@@ -156,8 +161,10 @@ public class TownGenerator {
             stages.add(() -> {
                 Location spot = center.clone().add(off[0], 0, off[1]);
                 spot.setY(Blueprint.groundY(world, spot.getBlockX(), spot.getBlockZ()));
+                int r = clearRadiusFor(landmark);
+                occ.reserve(spot.getBlockX(), spot.getBlockZ(), r, r, 0, landmark.name());
                 try {
-                    bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), clearRadiusFor(landmark));
+                    bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), r);
                     build(world, bp, rng, spot, landmark);
                     plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
                 } catch (Exception e) {
@@ -197,9 +204,19 @@ public class TownGenerator {
             for (TownPlan.Plot plot : new ArrayList<>(plan.getPlots())) {
                 if (!plan.shouldBuild(plot, rng)) continue;
 
+                int hw = plot.width() - 1, hl = plot.depth() - 1;
+
+                // Uneven or waterlogged ground: leave a gap rather than
+                // producing a half-buried, half-stilted building.
+                int maxDrop = plot.district() == TownPlan.District.DOWNTOWN ? 3 : 5;
+                if (!Occupancy.isBuildable(world, plot.x(), plot.z(), hw, hl, maxDrop)) continue;
+
+                // Anything already standing here wins.
+                int margin = plot.district() == TownPlan.District.DOWNTOWN ? 1 : 3;
+                if (!occ.reserve(plot.x(), plot.z(), hw, hl, margin, "house")) continue;
+
                 Location spot = new Location(world, plot.x(), 0, plot.z());
-                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
-                if (spot.getBlockY() < world.getSeaLevel() - 1) continue;
+                spot.setY(Occupancy.averageGround(world, plot.x(), plot.z(), hw, hl));
                 if (plugin.getLandmarkManager().landmarkAt(spot) != null) continue;
 
                 try {
@@ -241,6 +258,26 @@ public class TownGenerator {
                 index++;
             }
         }.runTaskTimer(plugin, 5L, 2L);
+    }
+
+    /**
+     * Pulls plots until one is found that is unoccupied AND on ground flat
+     * enough to build on, reserving it. Returns null if the district is full.
+     */
+    private TownPlan.Plot takeBuildablePlot(TownPlan plan, Occupancy occ, World world,
+                                            TownPlan.District district,
+                                            int minW, int minD, String owner) {
+        for (int attempt = 0; attempt < 40; attempt++) {
+            TownPlan.Plot plot = plan.takePlot(district, minW, minD);
+            if (plot == null) return null;
+
+            int hw = plot.width() - 1, hl = plot.depth() - 1;
+            if (!Occupancy.isBuildable(world, plot.x(), plot.z(), hw, hl, 5)) continue;
+            // Landmarks get a wide berth so they read as important.
+            if (!occ.reserve(plot.x(), plot.z(), hw + 3, hl + 3, 4, owner)) continue;
+            return plot;
+        }
+        return null;
     }
 
     /** Routes an in-town landmark to its builder, oriented to its plot. */
@@ -800,7 +837,10 @@ public class TownGenerator {
         Material[] pal = shopPalettes[rng.nextInt(shopPalettes.length)];
 
         // Taller nearer the square, so the skyline has a centre.
-        int storeys = plot.distance() < 35 ? 2 + rng.nextInt(2) : 1 + rng.nextInt(2);
+        // Vary storeys so a terrace has a real skyline instead of a flat top.
+        // Taller nearer the square, but with enough spread that neighbours differ.
+        int base = plot.distance() < 35 ? 3 : plot.distance() < 55 ? 2 : 1;
+        int storeys = Math.max(1, base + rng.nextInt(2) - (rng.nextInt(4) == 0 ? 1 : 0));
 
         bp.shopfront(x, y, z, plot.width() - 1, plot.depth() - 1, storeys,
                 plot.facing(), pal[0], pal[1], pal[2]);
@@ -839,6 +879,10 @@ public class TownGenerator {
         bp.doorFacing(x, y, z, hw, hl, facing, Material.OAK_DOOR);
         bp.gableRoof(x, y + h, z, hw, hl, palette[2], palette[3]);
         bp.foundationSkirt(x, y, z, hw, hl, Material.COBBLESTONE);
+
+        // A path from the door out to the street, stopping when it gets there.
+        bp.frontPath(x, y, z, hw, hl, facing,
+                plot.district() == TownPlan.District.DOWNTOWN ? 3 : 9);
 
         if (rng.nextBoolean()) {
             bp.chimney(x + hw - 2, y + h, z + hl - 2, 4, Material.BRICKS);

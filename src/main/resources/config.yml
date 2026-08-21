@@ -110,3 +110,16 @@ lore:
   book-loot-chance-percent: 12.0      # chance per generated container
   white-oak-discovery-enabled: true   # standing near pale oak reveals the Ash-Mother fragment
   ambient-check-interval-ticks: 200   # how often passive discoveries are evaluated
+
+# BlueMap integration. Only used if BlueMap is installed.
+# Note: no third-party BlueMap claim addon can show MysticCraft territory,
+# because clans are native to this plugin rather than built on Towny or
+# GriefPrevention. This is the bridge that can.
+bluemap:
+  show-territory: true
+  show-landmarks: true
+  # Some places are better left off a public map. The Tomb is sealed content,
+  # and if everyone knows exactly where the White Oak stands from day one,
+  # the politics of guarding it never get a chance to develop.
+  reveal-the-tomb: false
+  reveal-the-white-oak: false

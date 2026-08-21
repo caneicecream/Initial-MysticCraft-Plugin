@@ -2,6 +2,7 @@ name: MysticCraft
 version: '1.0.0'
 main: com.canopycreations.mysticcraft.MysticCraft
 api-version: '26.2'
+softdepend: [PlaceholderAPI, BlueMap]
 author: CanopyCreations
 description: Vampire Diaries-inspired supernatural races - Vampires, Werewolves, Witches
 

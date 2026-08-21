@@ -175,6 +175,7 @@ public class ClanManager {
         chunkOwners.put(key, clan.getName().toLowerCase(Locale.ROOT));
         clan.getClaimedChunks().add(key);
         save();
+        plugin.refreshMap();
         return true;
     }
 
@@ -183,6 +184,7 @@ public class ClanManager {
         if (!clan.getClaimedChunks().remove(key)) return false;
         chunkOwners.remove(key);
         save();
+        plugin.refreshMap();
         return true;
     }
 }

@@ -130,37 +130,60 @@ public class Blueprint {
     // ------------------------------------------------------------------
 
     /**
-     * Walls with a proper window rhythm and corner posts. Windows are placed
-     * on a regular beat rather than randomly, which is what makes a facade
-     * look designed.
+     * Walls with windows in aligned vertical columns.
+     *
+     * The old version used a modulo on the raw coordinate, which meant window
+     * placement depended on where in the world the building happened to sit -
+     * so windows landed at irregular offsets and didn't line up between
+     * storeys. This measures from the building's own centre instead, giving
+     * every facade a symmetrical, repeating rhythm with sills and lintels.
      */
     public void walls(int cx, int cy, int cz, int halfW, int halfL, int height,
                       Material wall, Material post, Material window) {
+        boolean twoStorey = height > 8;
+
         for (int x = -halfW; x <= halfW; x++) {
             for (int z = -halfL; z <= halfL; z++) {
                 boolean edge = Math.abs(x) == halfW || Math.abs(z) == halfL;
                 if (!edge) continue;
                 boolean corner = Math.abs(x) == halfW && Math.abs(z) == halfL;
 
+                // Distance from the middle of THIS wall, so windows are
+                // symmetrical about the centre of each facade.
+                int along = (Math.abs(x) == halfW) ? z : x;
+                int span  = (Math.abs(x) == halfW) ? halfL : halfW;
+                boolean windowColumn = Math.abs(along) % 3 == 1 && Math.abs(along) < span;
+
                 for (int y = 0; y < height; y++) {
                     Material m = corner ? post : wall;
 
-                    // Window band: every third block, one storey up, two tall.
-                    if (!corner && window != null) {
-                        int along = (Math.abs(x) == halfW) ? z : x;
-                        boolean onBeat = Math.floorMod(along, 3) == 0;
-                        boolean firstFloor = y == 2 || y == 3;
-                        boolean secondFloor = height > 8 && (y == 7 || y == 8);
-                        if (onBeat && (firstFloor || secondFloor)) m = window;
+                    if (!corner && window != null && windowColumn) {
+                        boolean lower = y == 2 || y == 3;
+                        boolean upper = twoStorey && (y == 7 || y == 8);
+                        if (lower || upper) m = window;
+                        // Stone sill under each opening.
+                        if (y == 1 || (twoStorey && y == 6)) m = post;
+                        // Lintel over each opening.
+                        if (y == 4 || (twoStorey && y == 9)) m = post;
                     }
                     world.getBlockAt(cx + x, cy + y, cz + z).setType(m);
                 }
             }
         }
-        // Floor
+
+        // Floor.
         for (int x = -halfW + 1; x < halfW; x++) {
             for (int z = -halfL + 1; z < halfL; z++) {
                 world.getBlockAt(cx + x, cy - 1, cz + z).setType(post);
+            }
+        }
+
+        // A second storey needs a floor, or you can see straight up into the roof.
+        if (twoStorey) {
+            for (int x = -halfW + 1; x < halfW; x++) {
+                for (int z = -halfL + 1; z < halfL; z++) {
+                    world.getBlockAt(cx + x, cy + 5, cz + z).setType(wall);
+                }
             }
         }
     }
@@ -216,20 +239,40 @@ public class Blueprint {
     }
 
     /**
-     * A short path from the door out to the street. Small detail, but it's
-     * what visually ties a building to the road it belongs to.
+     * A short path from the door out to the street.
+     *
+     * It stops the moment it reaches street paving or runs out of room -
+     * previously it ran a fixed six blocks regardless, which is why paths
+     * were cutting straight through neighbouring houses.
      */
-    public void frontPath(int cx, int cy, int cz, int halfW, int halfL, TownPlan.Facing facing) {
-        for (int b = 1; b <= 6; b++) {
+    public void frontPath(int cx, int cy, int cz, int halfW, int halfL,
+                          TownPlan.Facing facing, int maxLength) {
+        for (int b = 1; b <= maxLength; b++) {
             int px = cx + facing.dx * (halfW + b);
             int pz = cz + facing.dz * (halfL + b);
             int py = groundY(world, px, pz);
+
+            Material here = world.getBlockAt(px, py, pz).getType();
+            // Reached the road - stop, don't pave over it.
+            if (here == Material.DIRT_PATH || here == Material.COARSE_DIRT
+                    || here == Material.COBBLESTONE) {
+                return;
+            }
+            // Ran into something built - stop rather than tunnel through it.
+            if (here.name().contains("PLANK") || here.name().contains("BRICK")
+                    || here.name().contains("LOG") || here.name().contains("TERRACOTTA")) {
+                return;
+            }
+
             world.getBlockAt(px, py, pz).setType(Material.GRAVEL);
 
-            // A second tile wide, so it reads as a path not a line.
             int sx = px + (facing.dx != 0 ? 0 : 1);
             int sz = pz + (facing.dz != 0 ? 0 : 1);
-            world.getBlockAt(sx, groundY(world, sx, sz), sz).setType(Material.GRAVEL);
+            int sy = groundY(world, sx, sz);
+            Material side = world.getBlockAt(sx, sy, sz).getType();
+            if (!side.name().contains("PLANK") && !side.name().contains("BRICK")) {
+                world.getBlockAt(sx, sy, sz).setType(Material.GRAVEL);
+            }
         }
     }
 
@@ -293,10 +336,14 @@ public class Blueprint {
                     if (streetSide && !corner && y >= 1 && y <= 3) {
                         m = Material.GLASS_PANE;
                     }
-                    // Upper storey windows on a regular beat, all sides.
-                    else if (!corner && y > 4 && (y % 4 == 2 || y % 4 == 3)) {
+                    // Upper-storey windows in aligned columns, measured from
+                    // the centre of each facade so they stack neatly.
+                    else if (!corner && y > 4) {
                         int along = (Math.abs(x) == halfW) ? z : x;
-                        if (Math.floorMod(along, 3) == 0) m = Material.GLASS_PANE;
+                        int span  = (Math.abs(x) == halfW) ? halfL : halfW;
+                        boolean col = Math.abs(along) % 2 == 1 && Math.abs(along) < span;
+                        int inStorey = (y - 4) % 4;
+                        if (col && (inStorey == 1 || inStorey == 2)) m = Material.GLASS_PANE;
                     }
                     world.getBlockAt(cx + x, cy + y, cz + z).setType(m);
                 }
@@ -344,32 +391,70 @@ public class Blueprint {
     // ------------------------------------------------------------------
 
     /**
-     * A gabled roof built from stairs. This is the detail that most separates
-     * "generated box" from "building" at a glance.
+     * A gabled roof with a real pitch, an eaves overhang, and a ridge.
+     *
+     * The old version stepped inward on every layer from all four sides,
+     * which on a wide building produced a chunky stone pyramid rather than a
+     * roof. This pitches along the short axis only, so the ridge runs the
+     * length of the building the way an actual roof does.
      */
-    public void gableRoof(int cx, int cy, int cz, int halfW, int halfL, Material stairs, Material fill) {
-        int peak = Math.min(halfW, 6);
-        for (int layer = 0; layer <= peak; layer++) {
-            int inset = layer;
-            int y = cy + layer;
+    public void gableRoof(int cx, int cy, int cz, int halfW, int halfL,
+                          Material stairs, Material fill) {
+        // Pitch across the narrower axis so the ridge runs the long way.
+        boolean ridgeRunsZ = halfW <= halfL;
+        int pitchHalf = ridgeRunsZ ? halfW : halfL;
+        int runHalf   = ridgeRunsZ ? halfL : halfW;
 
-            for (int z = -halfL - 1 + inset; z <= halfL + 1 - inset; z++) {
-                // Sloped sides
-                placeStair(cx - halfW - 1 + inset, y, cz + z, stairs, BlockFace.EAST);
-                placeStair(cx + halfW + 1 - inset, y, cz + z, stairs, BlockFace.WEST);
-            }
-            // Cap the ridge
-            if (layer == peak) {
-                for (int z = -halfL - 1 + inset; z <= halfL + 1 - inset; z++) {
-                    for (int x = -halfW - 1 + inset; x <= halfW + 1 - inset; x++) {
-                        world.getBlockAt(cx + x, y, cz + z).setType(fill);
-                    }
+        int peak = Math.min(pitchHalf + 1, 7);
+
+        for (int layer = 0; layer <= peak; layer++) {
+            int y = cy + layer;
+            int inset = layer - 1;          // layer 0 is the overhanging eave
+            int halfSpan = pitchHalf + 1 - inset;
+            if (halfSpan < 0) break;
+
+            int endInset = Math.max(0, layer - 1);
+            int runSpan = runHalf + 1 - endInset;
+
+            for (int alongRun = -runSpan; alongRun <= runSpan; alongRun++) {
+                if (layer >= peak) {
+                    // Ridge cap along the top.
+                    int rx = ridgeRunsZ ? cx : cx + alongRun;
+                    int rz = ridgeRunsZ ? cz + alongRun : cz;
+                    world.getBlockAt(rx, y, rz).setType(fill);
+                    continue;
                 }
-            } else {
-                // Close the gable ends
-                for (int x = -halfW - 1 + inset; x <= halfW + 1 - inset; x++) {
-                    world.getBlockAt(cx + x, y, cz - halfL - 1 + inset).setType(fill);
-                    world.getBlockAt(cx + x, y, cz + halfL + 1 - inset).setType(fill);
+
+                // Both sloping faces.
+                for (int side : new int[]{-1, 1}) {
+                    int offset = halfSpan * side;
+                    int px = ridgeRunsZ ? cx + offset : cx + alongRun;
+                    int pz = ridgeRunsZ ? cz + alongRun : cz + offset;
+
+                    BlockFace facing = ridgeRunsZ
+                            ? (side < 0 ? BlockFace.EAST : BlockFace.WEST)
+                            : (side < 0 ? BlockFace.SOUTH : BlockFace.NORTH);
+                    placeStair(px, y, pz, stairs, facing);
+                }
+
+                // Fill the flat span between the two slopes.
+                for (int inner = -halfSpan + 1; inner <= halfSpan - 1; inner++) {
+                    int px = ridgeRunsZ ? cx + inner : cx + alongRun;
+                    int pz = ridgeRunsZ ? cz + alongRun : cz + inner;
+                    Block b = world.getBlockAt(px, y, pz);
+                    if (b.getType() == Material.AIR) b.setType(fill);
+                }
+            }
+
+            // Close the gable ends so you can't see into the loft.
+            if (layer < peak) {
+                for (int inner = -halfSpan; inner <= halfSpan; inner++) {
+                    for (int end : new int[]{-1, 1}) {
+                        int px = ridgeRunsZ ? cx + inner : cx + (runHalf + 1 - endInset) * end;
+                        int pz = ridgeRunsZ ? cz + (runHalf + 1 - endInset) * end : cz + inner;
+                        Block b = world.getBlockAt(px, y, pz);
+                        if (b.getType() == Material.AIR) b.setType(fill);
+                    }
                 }
             }
         }

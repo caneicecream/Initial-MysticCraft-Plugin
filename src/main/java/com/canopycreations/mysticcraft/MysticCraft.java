@@ -10,6 +10,8 @@ import com.canopycreations.mysticcraft.commands.VampireCommand;
 import com.canopycreations.mysticcraft.commands.WerewolfCommand;
 import com.canopycreations.mysticcraft.commands.WitchCommand;
 import com.canopycreations.mysticcraft.data.DataStore;
+import com.canopycreations.mysticcraft.integrations.bluemap.BlueMapBridge;
+import com.canopycreations.mysticcraft.integrations.papi.MysticPlaceholders;
 import com.canopycreations.mysticcraft.items.LoreBooks;
 import com.canopycreations.mysticcraft.items.MysticItems;
 import com.canopycreations.mysticcraft.listeners.CurseTriggerListener;
@@ -68,6 +70,7 @@ public class MysticCraft extends JavaPlugin {
     private RitualListener ritualListener;
     private TotemListener totemListener;
     private LoreBooks loreBooks;
+    private BlueMapBridge blueMapBridge; // null unless BlueMap is installed
     private LandmarkManager landmarkManager;
     private TownGenerator townGenerator;
 
@@ -123,6 +126,9 @@ public class MysticCraft extends JavaPlugin {
         getCommand("quest").setExecutor(new QuestCommand(this));
 
 
+        setupBlueMap();
+        setupPlaceholders();
+
         startTasks();
 
         getLogger().info("MysticCraft has awoken. Vampires, werewolves, and witches now walk among your players.");
@@ -146,6 +152,51 @@ public class MysticCraft extends JavaPlugin {
             landmarkManager.save();
         }
         getLogger().info("MysticCraft has gone dormant.");
+    }
+
+    /**
+     * BlueMap is optional. If it isn't installed this does nothing, and no
+     * BlueMap class is ever loaded - so the plugin runs fine without it.
+     */
+    private void setupBlueMap() {
+        if (Bukkit.getPluginManager().getPlugin("BlueMap") == null) {
+            getLogger().info("BlueMap not detected - skipping map integration.");
+            return;
+        }
+        try {
+            this.blueMapBridge = new BlueMapBridge(this);
+            blueMapBridge.register();
+        } catch (Throwable t) {
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Found BlueMap but couldn't hook into it. Map integration disabled; "
+                            + "everything else works normally.", t);
+            this.blueMapBridge = null;
+        }
+    }
+
+    /**
+     * Registers the PlaceholderAPI expansion. This is what makes MysticCraft
+     * data visible to HUDEngine, CommandPanels and EssentialsChat - one
+     * integration instead of three.
+     */
+    private void setupPlaceholders() {
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") == null) {
+            getLogger().warning("PlaceholderAPI not found. HUDEngine and CommandPanels "
+                    + "both need it to read MysticCraft data - install it to enable race HUDs and GUIs.");
+            return;
+        }
+        try {
+            new MysticPlaceholders(this).register();
+            getLogger().info("PlaceholderAPI detected - %mysticcraft_...% placeholders registered.");
+        } catch (Throwable t) {
+            getLogger().log(java.util.logging.Level.WARNING,
+                    "Found PlaceholderAPI but couldn't register the expansion.", t);
+        }
+    }
+
+    /** Redraws map markers. Safe to call when claims change; no-op without BlueMap. */
+    public void refreshMap() {
+        if (blueMapBridge != null) blueMapBridge.redraw();
     }
 
     private void startTasks() {

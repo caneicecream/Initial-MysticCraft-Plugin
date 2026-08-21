@@ -20,6 +20,14 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
+        <repository>
+            <id>bluecolored</id>
+            <url>https://repo.bluecolored.de/releases</url>
+        </repository>
+        <repository>
+            <id>placeholderapi</id>
+            <url>https://repo.extendedclip.com/releases/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -31,6 +39,24 @@
                  year.drop versioning in 2026 - this replaced the old
                  1.21.x-R0.1-SNAPSHOT scheme entirely. -->
             <version>26.2.build.112-stable</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- BlueMap map integration. Compile-time only: the bridge checks
+                 whether BlueMap is installed before touching any of these
+                 classes, so MysticCraft runs fine without it. -->
+            <groupId>de.bluecolored</groupId>
+            <artifactId>bluemap-api</artifactId>
+            <version>2.7.4</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <!-- PlaceholderAPI. Compile-time only. This is the common currency
+                 between MysticCraft and HUDEngine, CommandPanels, EssentialsChat
+                 and anything else that reads placeholders. -->
+            <groupId>me.clip</groupId>
+            <artifactId>placeholderapi</artifactId>
+            <version>2.11.6</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>
