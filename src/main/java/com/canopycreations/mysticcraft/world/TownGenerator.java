@@ -31,56 +31,132 @@ public class TownGenerator {
 
     private final MysticCraft plugin;
 
-    /** Landmark offsets from town centre. Fixed, so the geography reads consistently. */
-    private static final Map<Landmark, int[]> LAYOUT = new EnumMap<>(Landmark.class);
-    static {
-        LAYOUT.put(Landmark.TOWN_SQUARE,        new int[]{   0,    0});
-        LAYOUT.put(Landmark.THE_KETTLE,         new int[]{  28,   12});
-        LAYOUT.put(Landmark.THE_BOARDING_HOUSE, new int[]{ -74,  -58});
-        LAYOUT.put(Landmark.LOCKRIDGE_MANOR,    new int[]{  88,  -62});
-        LAYOUT.put(Landmark.THE_HEDGE_HOUSE,    new int[]{ -58,   74});
-        LAYOUT.put(Landmark.THE_BURNED_CHURCH,  new int[]{  16,  -88});
-        LAYOUT.put(Landmark.THE_TOMB,           new int[]{  16,  -88});
-        LAYOUT.put(Landmark.WICKER_BRIDGE,      new int[]{ 112,   48});
-        LAYOUT.put(Landmark.THE_WHITE_OAK,      new int[]{ -32, -124});
-        LAYOUT.put(Landmark.THE_QUARRY,         new int[]{-134,   22});
-        LAYOUT.put(Landmark.THE_OLD_CEMETERY,   new int[]{  42, -112});
-    }
+    /**
+     * Which landmarks sit on street frontage in the town proper, and which
+     * belong on the outskirts. A cemetery and a quarry on the high street
+     * would be strange; a tavern anywhere else would be.
+     */
+    /** The bar belongs downtown, on the main drag. */
+    private static final Landmark[] DOWNTOWN_LANDMARKS = { Landmark.THE_KETTLE };
 
-    /** Palettes so buildings vary but stay in one architectural family. */
-    private static final Material[][] PALETTES = {
-            {Material.SPRUCE_PLANKS, Material.SPRUCE_LOG, Material.SPRUCE_STAIRS, Material.DEEPSLATE_TILES},
-            {Material.OAK_PLANKS, Material.OAK_LOG, Material.OAK_STAIRS, Material.DEEPSLATE_TILES},
-            {Material.DARK_OAK_PLANKS, Material.DARK_OAK_LOG, Material.DARK_OAK_STAIRS, Material.DEEPSLATE_BRICKS},
-            {Material.STRIPPED_SPRUCE_WOOD, Material.SPRUCE_LOG, Material.SPRUCE_STAIRS, Material.TUFF_BRICKS}
+    /** The big houses sit out in the residential streets, on deep lots. */
+    private static final Landmark[] RESIDENTIAL_LANDMARKS = {
+            Landmark.THE_BOARDING_HOUSE,
+            Landmark.LOCKRIDGE_MANOR,
+            Landmark.THE_HEDGE_HOUSE
     };
+
+    /** Fixed offsets for the things that need space and distance. */
+    private static final Map<Landmark, int[]> OUTSKIRTS = new EnumMap<>(Landmark.class);
+    static {
+        // Real distances. The church is a walk. The quarry is a hike. That
+        // is how these things sit relative to a town in reality.
+        OUTSKIRTS.put(Landmark.THE_BURNED_CHURCH, new int[]{  -95, -305});
+        OUTSKIRTS.put(Landmark.THE_TOMB,          new int[]{  -95, -305});
+        OUTSKIRTS.put(Landmark.THE_OLD_CEMETERY,  new int[]{ -140, -355});
+        OUTSKIRTS.put(Landmark.THE_WHITE_OAK,     new int[]{  160, -370});
+        OUTSKIRTS.put(Landmark.THE_QUARRY,        new int[]{ -430,   85});
+        OUTSKIRTS.put(Landmark.WICKER_BRIDGE,     new int[]{  400,  125});
+    }
 
     public TownGenerator(MysticCraft plugin) {
         this.plugin = plugin;
     }
 
     /**
-     * Kicks off a staged build. Returns immediately; progress is reported to
-     * the requesting player as each stage lands.
+     * Kicks off a staged build. Streets go down first, then buildings are
+     * placed onto plots derived from those streets - so everything fronts a
+     * road and faces it.
      */
     public void generate(Location center, Player feedback, long seed) {
         World world = center.getWorld();
         Random rng = new Random(seed);
         Blueprint bp = new Blueprint(world, rng);
+        TownPlan plan = new TownPlan(center.getBlockX(), center.getBlockZ(), rng);
 
         List<Runnable> stages = new ArrayList<>();
         List<String> labels = new ArrayList<>();
 
-        // --- Stage 1: landmarks ---
-        for (Map.Entry<Landmark, int[]> entry : LAYOUT.entrySet()) {
+        // --- Stage 0: clear the town's footprint ---
+        // Downtown is fully cleared, residential is thinned, and the edge
+        // keeps enough trees that the town fades into woodland.
+        stages.add(() -> bp.clearDistrict(center.getBlockX(), center.getBlockZ(),
+                TownPlan.downtownRadius() + 15, 0.0, rng));
+        labels.add("§7clearing the town centre");
+
+        stages.add(() -> bp.clearDistrict(center.getBlockX(), center.getBlockZ(),
+                TownPlan.residentialRadius(), 0.28, rng));
+        labels.add("§7clearing the residential streets");
+
+        // --- Stage 1: the street network. Everything else hangs off this. ---
+        stages.add(() -> {
+            for (TownPlan.Street st : plan.getStreets()) {
+                bp.road(st.x1(), st.z1(), st.x2(), st.z2(),
+                        st.width(),
+                        st.major() ? Material.DIRT_PATH : Material.COARSE_DIRT,
+                        Material.COBBLESTONE);
+            }
+        });
+        labels.add("§7laying the streets");
+
+        // --- Stage 2: the square, at the crossroads ---
+        stages.add(() -> {
+            Location spot = center.clone();
+            spot.setY(Blueprint.groundY(world, spot.getBlockX(), spot.getBlockZ()));
+            bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), 26);
+            square(world, bp, rng, spot.getBlockX(), spot.getBlockY(), spot.getBlockZ());
+            plugin.getLandmarkManager().setLocation(Landmark.TOWN_SQUARE, spot, 34);
+        });
+        labels.add(Landmark.TOWN_SQUARE.getFormattedName());
+
+        // --- Stage 3a: downtown landmarks ---
+        for (Landmark landmark : DOWNTOWN_LANDMARKS) {
+            stages.add(() -> {
+                TownPlan.Plot plot = plan.takePlot(TownPlan.District.DOWNTOWN, 4, 5);
+                if (plot == null) plot = plan.takeAnyPlot();
+                if (plot == null) return;
+
+                Location spot = new Location(world, plot.x(), 0, plot.z());
+                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
+                try {
+                    bp.clearVegetation(plot.x(), plot.z(), clearRadiusFor(landmark));
+                    buildOnPlot(world, bp, rng, spot, landmark, plot);
+                    plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed building " + landmark + ": " + e.getMessage());
+                }
+            });
+            labels.add(landmark.getFormattedName());
+        }
+
+        // --- Stage 3b: the big residential houses ---
+        for (Landmark landmark : RESIDENTIAL_LANDMARKS) {
+            stages.add(() -> {
+                TownPlan.Plot plot = plan.takePlot(TownPlan.District.RESIDENTIAL, 5, 5);
+                if (plot == null) plot = plan.takeAnyPlot();
+                if (plot == null) return;
+
+                Location spot = new Location(world, plot.x(), 0, plot.z());
+                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
+                try {
+                    bp.clearVegetation(plot.x(), plot.z(), clearRadiusFor(landmark));
+                    buildOnPlot(world, bp, rng, spot, landmark, plot);
+                    plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed building " + landmark + ": " + e.getMessage());
+                }
+            });
+            labels.add(landmark.getFormattedName());
+        }
+
+        // --- Stage 4: outlying landmarks at fixed offsets ---
+        for (Map.Entry<Landmark, int[]> entry : OUTSKIRTS.entrySet()) {
             Landmark landmark = entry.getKey();
             int[] off = entry.getValue();
             stages.add(() -> {
                 Location spot = center.clone().add(off[0], 0, off[1]);
                 spot.setY(Blueprint.groundY(world, spot.getBlockX(), spot.getBlockZ()));
                 try {
-                    // Strip the forest before building, or the structure ends
-                    // up buried in spruce.
                     bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), clearRadiusFor(landmark));
                     build(world, bp, rng, spot, landmark);
                     plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
@@ -91,49 +167,54 @@ public class TownGenerator {
             labels.add(landmark.getFormattedName());
         }
 
-        // --- Stage 2: roads out from the square ---
+        // --- Stage 5: short spurs from the nearest country lane ---
+        // These connect a landmark to the existing lane network rather than
+        // running all the way back to the square, which is what produced the
+        // spoke pattern in the first place.
         stages.add(() -> {
-            int cx = center.getBlockX(), cz = center.getBlockZ();
-            for (Map.Entry<Landmark, int[]> e : LAYOUT.entrySet()) {
-                if (e.getKey() == Landmark.TOWN_SQUARE || e.getKey() == Landmark.THE_TOMB) continue;
-                int[] off = e.getValue();
-                boolean major = e.getKey() == Landmark.THE_KETTLE
-                        || e.getKey() == Landmark.THE_BURNED_CHURCH
-                        || e.getKey() == Landmark.LOCKRIDGE_MANOR;
-                bp.road(cx, cz, cx + off[0], cz + off[1], major ? 3 : 2,
-                        major ? Material.DIRT_PATH : Material.COARSE_DIRT,
-                        Material.COBBLESTONE);
+            for (int[] off : OUTSKIRTS.values()) {
+                int tx = center.getBlockX() + off[0];
+                int tz = center.getBlockZ() + off[1];
+
+                // Find the closest point on any street and join to that.
+                int bx = center.getBlockX(), bz = center.getBlockZ();
+                double best = Double.MAX_VALUE;
+                for (TownPlan.Street st : plan.getStreets()) {
+                    for (double t = 0; t <= 1.0; t += 0.1) {
+                        int sx = (int) Math.round(st.x1() + (st.x2() - st.x1()) * t);
+                        int sz = (int) Math.round(st.z1() + (st.z2() - st.z1()) * t);
+                        double d = Math.hypot(sx - tx, sz - tz);
+                        if (d < best) { best = d; bx = sx; bz = sz; }
+                    }
+                }
+                bp.road(bx, bz, tx, tz, 2, Material.COARSE_DIRT, Material.COBBLESTONE);
             }
         });
-        labels.add("§7roads");
+        labels.add("§7spurs to the outlying properties");
 
-        // --- Stage 3: filler houses along the roads ---
+        // --- Stage 6: fill remaining street frontage with houses ---
         stages.add(() -> {
-            int cx = center.getBlockX(), cz = center.getBlockZ();
-            int houses = 14 + rng.nextInt(8);
-            for (int i = 0; i < houses; i++) {
-                double angle = rng.nextDouble() * Math.PI * 2;
-                double dist = 30 + rng.nextDouble() * 70;
-                int x = cx + (int) (Math.cos(angle) * dist);
-                int z = cz + (int) (Math.sin(angle) * dist);
+            for (TownPlan.Plot plot : new ArrayList<>(plan.getPlots())) {
+                if (!plan.shouldBuild(plot, rng)) continue;
 
-                Location spot = new Location(world, x, 0, z);
-                spot.setY(Blueprint.groundY(world, x, z));
-
-                // Don't drop a cottage on top of a landmark.
-                if (plugin.getLandmarkManager().landmarkAt(spot) != null) continue;
-                // Don't build in deep water.
+                Location spot = new Location(world, plot.x(), 0, plot.z());
+                spot.setY(Blueprint.groundY(world, plot.x(), plot.z()));
                 if (spot.getBlockY() < world.getSeaLevel() - 1) continue;
+                if (plugin.getLandmarkManager().landmarkAt(spot) != null) continue;
 
                 try {
-                    bp.clearVegetation(x, z, 12);
-                    fillerHouse(world, bp, rng, spot);
+                    bp.clearVegetation(plot.x(), plot.z(), Math.max(plot.width(), plot.depth()) + 4);
+                    if (plot.district() == TownPlan.District.DOWNTOWN) {
+                        downtownShop(world, bp, rng, spot, plot);
+                    } else {
+                        fillerHouse(world, bp, rng, spot, plot);
+                    }
                 } catch (Exception ignored) {
-                    // a failed filler house isn't worth aborting the town for
+                    // one failed cottage shouldn't abort the town
                 }
             }
         });
-        labels.add("§7outlying houses");
+        labels.add("§7houses along the streets");
 
         // Run the stages one per tick so the server keeps breathing.
         new BukkitRunnable() {
@@ -145,7 +226,7 @@ public class TownGenerator {
                     if (feedback != null) {
                         feedback.sendMessage("");
                         feedback.sendMessage("§aAshfall stands. §8seed: §7" + seed);
-                        feedback.sendMessage("§8Re-roll with §7/mystic town confirm <seed>§8 elsewhere,");
+                        feedback.sendMessage("§8Re-roll elsewhere with §7/mystic town confirm <seed>§8,");
                         feedback.sendMessage("§8or re-point landmarks onto your own builds with");
                         feedback.sendMessage("§8§7/mystic landmark set <name>§8.");
                     }
@@ -162,7 +243,19 @@ public class TownGenerator {
         }.runTaskTimer(plugin, 5L, 2L);
     }
 
-    /** How much forest to strip before building each landmark. */
+    /** Routes an in-town landmark to its builder, oriented to its plot. */
+    private void buildOnPlot(World world, Blueprint bp, Random rng,
+                             Location at, Landmark landmark, TownPlan.Plot plot) {
+        int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
+        switch (landmark) {
+            case THE_KETTLE -> tavern(world, bp, rng, x, y, z, plot.facing());
+            case THE_BOARDING_HOUSE -> manor(world, bp, rng, x, y, z, true, plot.facing());
+            case LOCKRIDGE_MANOR -> manor(world, bp, rng, x, y, z, false, plot.facing());
+            case THE_HEDGE_HOUSE -> hedgeHouse(world, bp, rng, x, y, z, plot.facing());
+            default -> build(world, bp, rng, at, landmark);
+        }
+    }
+
     private int clearRadiusFor(Landmark landmark) {
         return switch (landmark) {
             case TOWN_SQUARE -> 20;
@@ -191,10 +284,13 @@ public class TownGenerator {
 
         switch (landmark) {
             case TOWN_SQUARE -> square(world, bp, rng, x, y, z);
-            case THE_KETTLE -> tavern(world, bp, rng, x, y, z);
-            case THE_BOARDING_HOUSE -> manor(world, bp, rng, x, y, z, true);
-            case LOCKRIDGE_MANOR -> manor(world, bp, rng, x, y, z, false);
-            case THE_HEDGE_HOUSE -> hedgeHouse(world, bp, rng, x, y, z);
+            // These four normally arrive via buildOnPlot() with a real street
+            // facing. This branch is the fallback for admin placement, where
+            // there's no plot, so they default to facing south.
+            case THE_KETTLE -> tavern(world, bp, rng, x, y, z, TownPlan.Facing.SOUTH);
+            case THE_BOARDING_HOUSE -> manor(world, bp, rng, x, y, z, true, TownPlan.Facing.SOUTH);
+            case LOCKRIDGE_MANOR -> manor(world, bp, rng, x, y, z, false, TownPlan.Facing.SOUTH);
+            case THE_HEDGE_HOUSE -> hedgeHouse(world, bp, rng, x, y, z, TownPlan.Facing.SOUTH);
             case THE_BURNED_CHURCH -> ruinedChurch(world, bp, rng, x, y, z);
             case THE_TOMB -> tomb(world, x, y, z);
             case WICKER_BRIDGE -> bridge(world, x, y, z);
@@ -210,10 +306,10 @@ public class TownGenerator {
 
     private void square(World world, Blueprint bp, Random rng, int x, int y, int z) {
         // Circular plaza with a radial paving pattern
-        for (int dx = -14; dx <= 14; dx++) {
-            for (int dz = -14; dz <= 14; dz++) {
+        for (int dx = -19; dx <= 19; dx++) {
+            for (int dz = -19; dz <= 19; dz++) {
                 double d = Math.sqrt(dx * dx + dz * dz);
-                if (d > 14) continue;
+                if (d > 19) continue;
                 Block b = world.getBlockAt(x + dx, y - 1, z + dz);
                 b.setType(d < 4 ? Material.POLISHED_ANDESITE
                         : ((dx + dz) % 4 == 0 ? Material.STONE_BRICKS : Material.SMOOTH_STONE));
@@ -225,7 +321,7 @@ public class TownGenerator {
         }
 
         // Clock tower
-        int h = 20;
+        int h = 26;
         bp.prepareSite(x, y, z, 3, 3, Material.STONE_BRICKS);
         for (int cy = 0; cy < h; cy++) {
             for (int dx = -2; dx <= 2; dx++) {
@@ -249,8 +345,8 @@ public class TownGenerator {
         // Benches and lamps ringing the plaza
         for (int i = 0; i < 8; i++) {
             double a = (Math.PI * 2 / 8) * i;
-            int bx = x + (int) (Math.cos(a) * 10);
-            int bz = z + (int) (Math.sin(a) * 10);
+            int bx = x + (int) (Math.cos(a) * 14);
+            int bz = z + (int) (Math.sin(a) * 14);
             world.getBlockAt(bx, y, bz).setType(Material.OAK_STAIRS);
             world.getBlockAt(bx + 1, y, bz).setType(Material.OAK_STAIRS);
             if (i % 2 == 0) {
@@ -261,12 +357,12 @@ public class TownGenerator {
         }
     }
 
-    private void tavern(World world, Blueprint bp, Random rng, int x, int y, int z) {
+    private void tavern(World world, Blueprint bp, Random rng, int x, int y, int z, TownPlan.Facing facing) {
         int hw = 7, hl = 6, h = 7;
         bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
         bp.walls(x, y, z, hw, hl, h, Material.SPRUCE_PLANKS, Material.SPRUCE_LOG, Material.GLASS_PANE);
-        bp.door(x, y, z, hl, Material.SPRUCE_DOOR);
-        bp.porch(x, y, z - hl, 4, Material.SPRUCE_FENCE, Material.SPRUCE_SLAB);
+        bp.doorFacing(x, y, z, hw, hl, facing, Material.SPRUCE_DOOR);
+        bp.porchFacing(x, y, z, hw, hl, facing, Material.SPRUCE_FENCE, Material.SPRUCE_SLAB);
         bp.gableRoof(x, y + h, z, hw, hl, Material.DARK_OAK_STAIRS, Material.DARK_OAK_PLANKS);
         bp.chimney(x + hw - 2, y + h, z + hl - 2, 5, Material.BRICKS);
         bp.foundationSkirt(x, y, z, hw, hl, Material.COBBLESTONE);
@@ -286,7 +382,7 @@ public class TownGenerator {
         bp.weather(x, y, z, hw, hl, h, 0.08);
     }
 
-    private void manor(World world, Blueprint bp, Random rng, int x, int y, int z, boolean dark) {
+    private void manor(World world, Blueprint bp, Random rng, int x, int y, int z, boolean dark, TownPlan.Facing facing) {
         Material wall = dark ? Material.DARK_OAK_PLANKS : Material.STRIPPED_OAK_WOOD;
         Material post = dark ? Material.DARK_OAK_LOG : Material.OAK_LOG;
         Material stair = dark ? Material.DARK_OAK_STAIRS : Material.OAK_STAIRS;
@@ -295,8 +391,8 @@ public class TownGenerator {
         int hw = 10, hl = 8, h = 13;
         bp.prepareSite(x, y, z, hw, hl, Material.STONE_BRICKS);
         bp.walls(x, y, z, hw, hl, h, wall, post, Material.GLASS_PANE);
-        bp.door(x, y, z, hl, dark ? Material.DARK_OAK_DOOR : Material.OAK_DOOR);
-        bp.porch(x, y, z - hl, 5, post, dark ? Material.DARK_OAK_SLAB : Material.OAK_SLAB);
+        bp.doorFacing(x, y, z, hw, hl, facing, dark ? Material.DARK_OAK_DOOR : Material.OAK_DOOR);
+        bp.porchFacing(x, y, z, hw, hl, facing, post, dark ? Material.DARK_OAK_SLAB : Material.OAK_SLAB);
         bp.gableRoof(x, y + h, z, hw, hl, stair, roof);
         bp.chimney(x - hw + 2, y + h, z + hl - 3, 7, Material.DEEPSLATE_BRICKS);
         bp.chimney(x + hw - 3, y + h, z + hl - 3, 6, Material.DEEPSLATE_BRICKS);
@@ -319,19 +415,22 @@ public class TownGenerator {
         bp.weather(x, y, z, hw, hl, h, dark ? 0.2 : 0.1);
     }
 
-    private void hedgeHouse(World world, Blueprint bp, Random rng, int x, int y, int z) {
+    private void hedgeHouse(World world, Blueprint bp, Random rng, int x, int y, int z, TownPlan.Facing facing) {
         int hw = 5, hl = 5, h = 6;
         bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
         bp.walls(x, y, z, hw, hl, h, Material.OAK_PLANKS, Material.OAK_LOG, Material.GLASS_PANE);
-        bp.door(x, y, z, hl, Material.OAK_DOOR);
+        bp.doorFacing(x, y, z, hw, hl, facing, Material.OAK_DOOR);
         bp.gableRoof(x, y + h, z, hw, hl, Material.OAK_STAIRS, Material.MOSSY_COBBLESTONE);
         bp.chimney(x + hw - 2, y + h, z + hl - 2, 4, Material.COBBLESTONE);
         bp.furnish(x, y, z, hw - 1, hl - 1, true);
 
-        // Herb garden - the tell
-        for (int dx = -7; dx <= 7; dx++) {
-            for (int dz = hl + 2; dz <= hl + 7; dz++) {
-                Block soil = world.getBlockAt(x + dx, y - 1, z + dz);
+        // Herb garden, behind the house rather than out front.
+        TownPlan.Facing back = facing.opposite();
+        for (int a = -7; a <= 7; a++) {
+            for (int b = hl + 2; b <= hl + 7; b++) {
+                int gx = x + (back.dx != 0 ? back.dx * b : a);
+                int gz = z + (back.dz != 0 ? back.dz * b : a);
+                Block soil = world.getBlockAt(gx, y - 1, gz);
                 soil.setType(Material.FARMLAND);
                 Block crop = soil.getRelative(BlockFace.UP);
                 crop.setType(switch (rng.nextInt(4)) {
@@ -342,9 +441,11 @@ public class TownGenerator {
                 });
             }
         }
-        // Salt line across the threshold
-        for (int dx = -3; dx <= 3; dx++) {
-            world.getBlockAt(x + dx, y - 1, z - hl - 1).setType(Material.CALCITE);
+        // Salt line across the threshold, on whichever side the door is.
+        for (int a = -3; a <= 3; a++) {
+            int sx = x + (facing.dx != 0 ? facing.dx * (hw + 1) : a);
+            int sz = z + (facing.dz != 0 ? facing.dz * (hl + 1) : a);
+            world.getBlockAt(sx, y - 1, sz).setType(Material.CALCITE);
         }
         // Drying racks
         for (int dx = -hw; dx <= hw; dx += 3) {
@@ -680,18 +781,49 @@ public class TownGenerator {
     // Filler
     // ------------------------------------------------------------------
 
-    private void fillerHouse(World world, Blueprint bp, Random rng, Location at) {
+    /**
+     * A downtown commercial building. Two or three storeys, flat roof, no
+     * yard, sitting hard against the pavement and its neighbours. Brick and
+     * painted timber rather than the cottage palette used further out.
+     */
+    private void downtownShop(World world, Blueprint bp, Random rng,
+                              Location at, TownPlan.Plot plot) {
+        int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
+
+        Material[][] shopPalettes = {
+                {Material.BRICKS,               Material.DEEPSLATE_BRICKS, Material.DEEPSLATE_TILES},
+                {Material.STRIPPED_DARK_OAK_WOOD, Material.DARK_OAK_LOG,   Material.DEEPSLATE_TILES},
+                {Material.SMOOTH_STONE,         Material.STONE_BRICKS,     Material.TUFF_BRICKS},
+                {Material.TERRACOTTA,           Material.DARK_OAK_LOG,     Material.DEEPSLATE_TILES},
+                {Material.WHITE_TERRACOTTA,     Material.STONE_BRICKS,     Material.DEEPSLATE_TILES}
+        };
+        Material[] pal = shopPalettes[rng.nextInt(shopPalettes.length)];
+
+        // Taller nearer the square, so the skyline has a centre.
+        int storeys = plot.distance() < 35 ? 2 + rng.nextInt(2) : 1 + rng.nextInt(2);
+
+        bp.shopfront(x, y, z, plot.width() - 1, plot.depth() - 1, storeys,
+                plot.facing(), pal[0], pal[1], pal[2]);
+
+        bp.furnish(x, y, z, plot.width() - 2, plot.depth() - 2, true);
+        bp.weather(x, y, z, plot.width(), plot.depth(), 6, 0.06);
+    }
+
+    private void fillerHouse(World world, Blueprint bp, Random rng, Location at, TownPlan.Plot plot) {
         int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
         Material[] palette = PALETTES[rng.nextInt(PALETTES.length)];
 
-        int hw = 4 + rng.nextInt(3);
-        int hl = 4 + rng.nextInt(3);
+        // Footprint comes from the plot, so buildings on the same street
+        // sit at a consistent depth from the road.
+        int hw = plot.width() - 1;
+        int hl = plot.depth() - 1;
         int h = 5 + rng.nextInt(3);
+        TownPlan.Facing facing = plot.facing();
         boolean abandoned = rng.nextInt(6) == 0;
 
         bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
         bp.walls(x, y, z, hw, hl, h, palette[0], palette[1], abandoned ? null : Material.GLASS_PANE);
-        bp.door(x, y, z, hl, Material.OAK_DOOR);
+        bp.doorFacing(x, y, z, hw, hl, facing, Material.OAK_DOOR);
         bp.gableRoof(x, y + h, z, hw, hl, palette[2], palette[3]);
         bp.foundationSkirt(x, y, z, hw, hl, Material.COBBLESTONE);
 
@@ -699,7 +831,7 @@ public class TownGenerator {
             bp.chimney(x + hw - 2, y + h, z + hl - 2, 4, Material.BRICKS);
         }
         if (rng.nextInt(3) == 0) {
-            bp.porch(x, y, z - hl, 3, palette[1], Material.OAK_SLAB);
+            bp.porchFacing(x, y, z, hw, hl, facing, palette[1], Material.OAK_SLAB);
         }
 
         bp.furnish(x, y, z, hw - 1, hl - 1, !abandoned);
