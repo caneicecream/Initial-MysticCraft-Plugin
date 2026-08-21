@@ -77,8 +77,11 @@ public class TownGenerator {
             int[] off = entry.getValue();
             stages.add(() -> {
                 Location spot = center.clone().add(off[0], 0, off[1]);
-                spot.setY(world.getHighestBlockYAt(spot));
+                spot.setY(Blueprint.groundY(world, spot.getBlockX(), spot.getBlockZ()));
                 try {
+                    // Strip the forest before building, or the structure ends
+                    // up buried in spruce.
+                    bp.clearVegetation(spot.getBlockX(), spot.getBlockZ(), clearRadiusFor(landmark));
                     build(world, bp, rng, spot, landmark);
                     plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
                 } catch (Exception e) {
@@ -115,12 +118,15 @@ public class TownGenerator {
                 int z = cz + (int) (Math.sin(angle) * dist);
 
                 Location spot = new Location(world, x, 0, z);
-                spot.setY(world.getHighestBlockYAt(spot));
+                spot.setY(Blueprint.groundY(world, x, z));
 
                 // Don't drop a cottage on top of a landmark.
                 if (plugin.getLandmarkManager().landmarkAt(spot) != null) continue;
+                // Don't build in deep water.
+                if (spot.getBlockY() < world.getSeaLevel() - 1) continue;
 
                 try {
+                    bp.clearVegetation(x, z, 12);
                     fillerHouse(world, bp, rng, spot);
                 } catch (Exception ignored) {
                     // a failed filler house isn't worth aborting the town for
@@ -154,6 +160,21 @@ public class TownGenerator {
                 index++;
             }
         }.runTaskTimer(plugin, 5L, 2L);
+    }
+
+    /** How much forest to strip before building each landmark. */
+    private int clearRadiusFor(Landmark landmark) {
+        return switch (landmark) {
+            case TOWN_SQUARE -> 20;
+            case THE_QUARRY -> 32;
+            case THE_OLD_CEMETERY -> 26;
+            case THE_WHITE_OAK -> 20;
+            case THE_BOARDING_HOUSE, LOCKRIDGE_MANOR -> 22;
+            case THE_BURNED_CHURCH -> 20;
+            case WICKER_BRIDGE -> 30;
+            case THE_TOMB -> 0;   // underground; nothing to clear
+            default -> 14;
+        };
     }
 
     private int radiusFor(Landmark landmark) {
@@ -417,129 +438,201 @@ public class TownGenerator {
     }
 
     private void bridge(World world, int x, int y, int z) {
-        // River channel
+        // Carve a river channel at ground level, then span it. The deck sits
+        // just above the waterline rather than at whatever height the trees
+        // happened to be.
+        int waterY = y - 1;
+
         for (int dz = -26; dz <= 26; dz++) {
             for (int dx = -6; dx <= 6; dx++) {
+                int wx = x + dx, wz = z + dz;
                 double edge = Math.abs(dx) / 6.0;
                 int depth = (int) (3 * (1 - edge)) + 1;
+
+                // Clear anything standing in the channel.
+                int top = world.getHighestBlockYAt(wx, wz);
+                for (int cy = waterY - depth; cy <= top; cy++) {
+                    world.getBlockAt(wx, cy, wz).setType(Material.AIR);
+                }
                 for (int dy = 0; dy < depth; dy++) {
-                    world.getBlockAt(x + dx, y - 1 - dy, z + dz).setType(Material.WATER);
+                    world.getBlockAt(wx, waterY - dy, wz).setType(Material.WATER);
                 }
-                world.getBlockAt(x + dx, y - 1 - depth, z + dz).setType(Material.GRAVEL);
-                for (int dy = 0; dy < 6; dy++) {
-                    Block b = world.getBlockAt(x + dx, y + dy, z + dz);
-                    if (b.getType() != Material.AIR) b.setType(Material.AIR);
-                }
+                world.getBlockAt(wx, waterY - depth, wz).setType(Material.GRAVEL);
             }
         }
-        // Deck with supports
+
+        // Deck, one above the water.
+        int deckY = waterY + 2;
         for (int dz = -10; dz <= 10; dz++) {
             for (int dx = -3; dx <= 3; dx++) {
-                world.getBlockAt(x + dx, y + 1, z + dz).setType(Material.OAK_PLANKS);
+                world.getBlockAt(x + dx, deckY, z + dz).setType(Material.OAK_PLANKS);
             }
-            world.getBlockAt(x - 4, y + 2, z + dz).setType(Material.OAK_FENCE);
-            world.getBlockAt(x + 4, y + 2, z + dz).setType(Material.OAK_FENCE);
+            world.getBlockAt(x - 4, deckY, z + dz).setType(Material.OAK_PLANKS);
+            world.getBlockAt(x + 4, deckY, z + dz).setType(Material.OAK_PLANKS);
+            world.getBlockAt(x - 4, deckY + 1, z + dz).setType(Material.OAK_FENCE);
+            world.getBlockAt(x + 4, deckY + 1, z + dz).setType(Material.OAK_FENCE);
+
             if (dz % 5 == 0) {
-                for (int dy = -4; dy <= 0; dy++) {
-                    world.getBlockAt(x - 3, y + dy, z + dz).setType(Material.OAK_LOG);
-                    world.getBlockAt(x + 3, y + dy, z + dz).setType(Material.OAK_LOG);
+                for (int dy = deckY - 1; dy >= waterY - 4; dy--) {
+                    world.getBlockAt(x - 3, dy, z + dz).setType(Material.OAK_LOG);
+                    world.getBlockAt(x + 3, dy, z + dz).setType(Material.OAK_LOG);
                 }
-                world.getBlockAt(x - 4, y + 3, z + dz).setType(Material.LANTERN);
+                world.getBlockAt(x - 4, deckY + 2, z + dz).setType(Material.LANTERN);
+            }
+        }
+
+        // Ramps up to the banks so the bridge connects to the ground.
+        for (int side : new int[]{-1, 1}) {
+            for (int step = 11; step <= 18; step++) {
+                int bz = z + side * step;
+                int bankY = Blueprint.groundY(world, x, bz);
+                int rampY = deckY + (bankY - deckY) * (step - 10) / 8;
+                for (int dx = -3; dx <= 3; dx++) {
+                    world.getBlockAt(x + dx, rampY, z + side * step).setType(Material.DIRT_PATH);
+                    for (int dy = 1; dy <= 4; dy++) {
+                        Block above = world.getBlockAt(x + dx, rampY + dy, z + side * step);
+                        if (above.getType() != Material.AIR) above.setType(Material.AIR);
+                    }
+                }
             }
         }
     }
 
     private void whiteOak(World world, Random rng, int x, int y, int z) {
-        // Clear a glade
-        for (int dx = -12; dx <= 12; dx++) {
-            for (int dz = -12; dz <= 12; dz++) {
-                if (dx * dx + dz * dz > 144) continue;
-                for (int dy = 0; dy < 30; dy++) {
-                    Block b = world.getBlockAt(x + dx, y + dy, z + dz);
-                    if (b.getType() != Material.AIR) b.setType(Material.AIR);
+        // Clear a proper glade. This tree should be visible from a distance
+        // and impossible to mistake for ordinary forest.
+        for (int dx = -20; dx <= 20; dx++) {
+            for (int dz = -20; dz <= 20; dz++) {
+                if (dx * dx + dz * dz > 400) continue;
+                int wx = x + dx, wz = z + dz;
+                int top = world.getHighestBlockYAt(wx, wz);
+                int ground = Blueprint.groundY(world, wx, wz);
+                for (int cy = ground + 1; cy <= top + 40; cy++) {
+                    world.getBlockAt(wx, cy, wz).setType(Material.AIR);
                 }
-                world.getBlockAt(x + dx, y - 1, z + dz).setType(Material.PODZOL);
+                if (dx * dx + dz * dz <= 196) {
+                    world.getBlockAt(wx, ground, wz).setType(Material.PODZOL);
+                }
             }
         }
 
-        // Trunk - wide at the base, tapering
-        int height = 26;
+        int height = 38;   // was 26 - it read as a shrub
+
+        // Buttressed trunk: 5x5 at the base, tapering to 3x3, then 2x2.
         for (int dy = 0; dy < height; dy++) {
-            int r = dy < 4 ? 2 : (dy < 12 ? 1 : 1);
+            int r = dy < 5 ? 2 : (dy < 16 ? 1 : 1);
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
-                    if (dy > 6 && (Math.abs(dx) + Math.abs(dz)) > 1) continue;
+                    // Round off the base corners so it's not a square column.
+                    if (dy < 5 && Math.abs(dx) == 2 && Math.abs(dz) == 2) continue;
+                    if (dy >= 16 && (Math.abs(dx) + Math.abs(dz)) > 1) continue;
                     world.getBlockAt(x + dx, y + dy, z + dz).setType(Material.PALE_OAK_LOG);
                 }
             }
         }
 
-        // Boughs
-        for (int i = 0; i < 6; i++) {
-            double a = (Math.PI * 2 / 6) * i + rng.nextDouble() * 0.4;
-            int by = y + height - 10 + rng.nextInt(6);
-            for (int step = 1; step <= 6; step++) {
-                int bx = x + (int) (Math.cos(a) * step);
-                int bz = z + (int) (Math.sin(a) * step);
-                world.getBlockAt(bx, by + step / 3, bz).setType(Material.PALE_OAK_LOG);
+        // Root flare at the base.
+        for (int i = 0; i < 8; i++) {
+            double a = (Math.PI * 2 / 8) * i;
+            for (int step = 2; step <= 5; step++) {
+                int rx = x + (int) Math.round(Math.cos(a) * step);
+                int rz = z + (int) Math.round(Math.sin(a) * step);
+                world.getBlockAt(rx, y, rz).setType(Material.PALE_OAK_WOOD);
             }
         }
 
-        // Canopy
-        for (int dy = height - 10; dy < height + 5; dy++) {
-            int r = 10 - Math.abs(dy - (height - 3));
+        // Major boughs sweeping out and up.
+        for (int i = 0; i < 7; i++) {
+            double a = (Math.PI * 2 / 7) * i + rng.nextDouble() * 0.5;
+            int by = y + height - 16 + rng.nextInt(9);
+            for (int step = 1; step <= 9; step++) {
+                int bx = x + (int) (Math.cos(a) * step);
+                int bz = z + (int) (Math.sin(a) * step);
+                world.getBlockAt(bx, by + step / 2, bz).setType(Material.PALE_OAK_LOG);
+            }
+        }
+
+        // Broad canopy.
+        int canopyBase = height - 16;
+        for (int dy = canopyBase; dy < height + 8; dy++) {
+            double t = (double) (dy - canopyBase) / (height + 8 - canopyBase);
+            int r = (int) (16 * Math.sin(t * Math.PI) + 4);
             if (r <= 0) continue;
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
                     if (dx * dx + dz * dz > r * r) continue;
-                    if (rng.nextInt(8) == 0) continue;
+                    if (rng.nextInt(9) == 0) continue;   // ragged edges
                     Block b = world.getBlockAt(x + dx, y + dy, z + dz);
                     if (b.getType() == Material.AIR) b.setType(Material.PALE_OAK_LEAVES);
                 }
             }
         }
 
-        // Old stone ring - somebody marked this a very long time ago
-        for (int i = 0; i < 40; i++) {
-            double a = (Math.PI * 2 / 40) * i;
-            int sx = x + (int) Math.round(Math.cos(a) * 8);
-            int sz = z + (int) Math.round(Math.sin(a) * 8);
-            world.getBlockAt(sx, y - 1, sz).setType(Material.MOSSY_COBBLESTONE);
-            if (i % 5 == 0) {
-                world.getBlockAt(sx, y, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
-                world.getBlockAt(sx, y + 1, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
+        // The old stone ring. Somebody marked this a very long time ago.
+        for (int i = 0; i < 48; i++) {
+            double a = (Math.PI * 2 / 48) * i;
+            int sx = x + (int) Math.round(Math.cos(a) * 11);
+            int sz = z + (int) Math.round(Math.sin(a) * 11);
+            int sy = Blueprint.groundY(world, sx, sz);
+            world.getBlockAt(sx, sy, sz).setType(Material.MOSSY_COBBLESTONE);
+            if (i % 6 == 0) {
+                world.getBlockAt(sx, sy + 1, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
+                world.getBlockAt(sx, sy + 2, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
+                world.getBlockAt(sx, sy + 3, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
             }
         }
     }
 
     private void quarry(World world, Random rng, int x, int y, int z) {
         int r = 26;
+        // Water fills only the lower part of the pit. Everything above the
+        // waterline is open air, so this reads as an excavation rather than
+        // the floating column the old version produced.
+        int waterTop = y - 10;
+
         for (int dx = -r; dx <= r; dx++) {
             for (int dz = -r; dz <= r; dz++) {
                 double d = Math.sqrt(dx * dx + dz * dz);
                 if (d > r) continue;
-                int depth = (int) ((r - d) * 0.75);
-                // Stepped terraces read as an excavation rather than a crater
+
+                int wx = x + dx, wz = z + dz;
+                int surface = Blueprint.groundY(world, wx, wz);
+
+                // Terraced sides: deeper toward the middle, stepped in fours.
+                int depth = (int) ((r - d) * 0.7);
                 int terrace = (depth / 4) * 4;
-                for (int dy = 0; dy <= terrace; dy++) {
-                    world.getBlockAt(x + dx, y - dy, z + dz)
-                            .setType(dy > terrace - 7 ? Material.WATER : Material.AIR);
+                int floorY = y - terrace;
+
+                // Clear everything from the pit floor up past the old surface.
+                for (int cy = floorY; cy <= Math.max(surface, y) + 12; cy++) {
+                    world.getBlockAt(wx, cy, wz).setType(Material.AIR);
                 }
+
+                // Fill the bottom with water, but never above the waterline.
+                for (int cy = floorY; cy <= Math.min(waterTop, y - 1); cy++) {
+                    world.getBlockAt(wx, cy, wz).setType(Material.WATER);
+                }
+
+                // Rock floor beneath.
+                world.getBlockAt(wx, floorY - 1, wz)
+                        .setType(rng.nextInt(8) == 0 ? Material.ANDESITE : Material.STONE);
+
+                // Exposed stone on the terrace faces.
                 if (terrace > 0) {
-                    world.getBlockAt(x + dx, y - terrace - 1, z + dz)
-                            .setType(rng.nextInt(8) == 0 ? Material.ANDESITE : Material.STONE);
+                    world.getBlockAt(wx, floorY, wz).setType(Material.STONE);
                 }
             }
         }
-        // Rusted fencing around the rim
-        for (int i = 0; i < 60; i++) {
-            double a = (Math.PI * 2 / 60) * i;
+
+        // Rusted fencing around the rim, on real ground, with gaps.
+        for (int i = 0; i < 70; i++) {
+            double a = (Math.PI * 2 / 70) * i;
             int fx = x + (int) (Math.cos(a) * (r + 2));
             int fz = z + (int) (Math.sin(a) * (r + 2));
-            int fy = world.getHighestBlockYAt(fx, fz);
-            if (rng.nextInt(6) == 0) continue; // gaps in the fence
-            world.getBlockAt(fx, fy, fz).setType(Material.IRON_BARS);
+            if (rng.nextInt(6) == 0) continue;
+            int fy = Blueprint.groundY(world, fx, fz);
             world.getBlockAt(fx, fy + 1, fz).setType(Material.IRON_BARS);
+            world.getBlockAt(fx, fy + 2, fz).setType(Material.IRON_BARS);
         }
     }
 
@@ -550,7 +643,7 @@ public class TownGenerator {
                 boolean edge = Math.abs(dx) == 20 || Math.abs(dz) == 20;
                 if (!edge) continue;
                 if (dx == 0 && dz == 20) continue; // gate
-                int fy = world.getHighestBlockYAt(x + dx, z + dz);
+                int fy = Blueprint.groundY(world, x + dx, z + dz);
                 world.getBlockAt(x + dx, fy, z + dz).setType(Material.IRON_BARS);
                 world.getBlockAt(x + dx, fy + 1, z + dz).setType(Material.IRON_BARS);
             }
@@ -560,7 +653,7 @@ public class TownGenerator {
         for (int dx = -16; dx <= 16; dx += 4) {
             for (int dz = -16; dz <= 14; dz += 5) {
                 if (rng.nextInt(7) == 0) continue;
-                int gy = world.getHighestBlockYAt(x + dx, z + dz);
+                int gy = Blueprint.groundY(world, x + dx, z + dz);
                 Material stone = rng.nextInt(4) == 0 ? Material.MOSSY_COBBLESTONE_WALL : Material.STONE_BRICK_WALL;
                 world.getBlockAt(x + dx, gy + 1, z + dz).setType(stone);
                 if (rng.nextInt(3) == 0) {
@@ -574,7 +667,7 @@ public class TownGenerator {
         }
 
         // Founders' mausoleum at the top of the hill
-        int my = world.getHighestBlockYAt(x, z - 18);
+        int my = Blueprint.groundY(world, x, z - 18);
         bp.prepareSite(x, my, z - 18, 4, 4, Material.POLISHED_DEEPSLATE);
         bp.walls(x, my, z - 18, 4, 4, 6, Material.POLISHED_DEEPSLATE,
                 Material.DEEPSLATE_BRICKS, null);
@@ -625,7 +718,7 @@ public class TownGenerator {
                 for (int dz = -hl - 3; dz <= hl + 3; dz++) {
                     boolean edge = Math.abs(dx) == hw + 3 || Math.abs(dz) == hl + 3;
                     if (!edge || rng.nextInt(8) == 0) continue;
-                    int fy = world.getHighestBlockYAt(x + dx, z + dz);
+                    int fy = Blueprint.groundY(world, x + dx, z + dz);
                     world.getBlockAt(x + dx, fy, z + dz).setType(Material.OAK_FENCE);
                 }
             }

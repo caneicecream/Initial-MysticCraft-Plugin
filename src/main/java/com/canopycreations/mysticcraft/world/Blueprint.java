@@ -33,6 +33,56 @@ public class Blueprint {
         this.rng = rng;
     }
 
+    /**
+     * The real ground height at a column.
+     *
+     * getHighestBlockYAt() returns the highest block of ANY kind, which in a
+     * forest is a leaf twenty blocks up. Building on that is what put roads
+     * in the sky. This scans down from the surface past vegetation, water and
+     * snow until it hits something you could actually stand on.
+     */
+    public static int groundY(World world, int x, int z) {
+        int y = world.getHighestBlockYAt(x, z);
+        int floor = world.getMinHeight() + 1;
+
+        while (y > floor) {
+            Material m = world.getBlockAt(x, y, z).getType();
+            if (isGround(m)) return y;
+            y--;
+        }
+        return world.getSeaLevel();
+    }
+
+    /** Blocks that count as terrain rather than something growing on it. */
+    private static boolean isGround(Material m) {
+        return switch (m) {
+            case GRASS_BLOCK, DIRT, COARSE_DIRT, PODZOL, ROOTED_DIRT, MUD,
+                 STONE, DEEPSLATE, ANDESITE, DIORITE, GRANITE, TUFF, CALCITE,
+                 SAND, RED_SAND, SANDSTONE, GRAVEL, CLAY,
+                 MOSS_BLOCK, MYCELIUM, SNOW_BLOCK, PACKED_ICE, TERRACOTTA -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Strips trees, grass, flowers and snow layers from a radius so a
+     * building doesn't generate half-buried in a spruce forest.
+     */
+    public void clearVegetation(int cx, int cz, int radius) {
+        for (int x = -radius; x <= radius; x++) {
+            for (int z = -radius; z <= radius; z++) {
+                if (x * x + z * z > radius * radius) continue;
+                int wx = cx + x, wz = cz + z;
+                int top = world.getHighestBlockYAt(wx, wz);
+                int ground = groundY(world, wx, wz);
+                for (int y = ground + 1; y <= top; y++) {
+                    Block b = world.getBlockAt(wx, y, wz);
+                    if (b.getType() != Material.AIR) b.setType(Material.AIR);
+                }
+            }
+        }
+    }
+
     // ------------------------------------------------------------------
     // Terrain preparation
     // ------------------------------------------------------------------
@@ -281,40 +331,75 @@ public class Blueprint {
     // ------------------------------------------------------------------
 
     /**
-     * A road between two points, following terrain height. Roads are what
-     * turn a scatter of buildings into a town.
+     * A road between two points, laid on real ground.
+     *
+     * Two fixes over the naive version: it uses groundY() so it can't ride
+     * along treetops, and it smooths its own gradient so a road crossing
+     * rolling terrain doesn't turn into a staircase. Vegetation is cleared
+     * above the surface, and the road is cut INTO hills rather than draped
+     * over whatever was there.
      */
     public void road(int x1, int z1, int x2, int z2, int width, Material surface, Material edge) {
         double dist = Math.hypot(x2 - x1, z2 - z1);
         int steps = (int) Math.ceil(dist);
         if (steps == 0) return;
 
+        // First pass: sample real ground height along the route.
+        int[] heights = new int[steps + 1];
+        int[] xs = new int[steps + 1];
+        int[] zs = new int[steps + 1];
         for (int i = 0; i <= steps; i++) {
             double t = (double) i / steps;
-            int x = (int) Math.round(x1 + (x2 - x1) * t);
-            int z = (int) Math.round(z1 + (z2 - z1) * t);
-            int y = world.getHighestBlockYAt(x, z);
+            xs[i] = (int) Math.round(x1 + (x2 - x1) * t);
+            zs[i] = (int) Math.round(z1 + (z2 - z1) * t);
+            heights[i] = groundY(world, xs[i], zs[i]);
+        }
+
+        // Second pass: smooth so the road grades instead of stepping.
+        int[] smooth = heights.clone();
+        for (int pass = 0; pass < 3; pass++) {
+            for (int i = 1; i < steps; i++) {
+                smooth[i] = Math.round((heights[i - 1] + heights[i] * 2 + heights[i + 1]) / 4f);
+            }
+            heights = smooth.clone();
+        }
+
+        // Third pass: actually lay it.
+        for (int i = 0; i <= steps; i++) {
+            int x = xs[i], z = zs[i], y = heights[i];
 
             for (int ox = -width; ox <= width; ox++) {
                 for (int oz = -width; oz <= width; oz++) {
                     if (ox * ox + oz * oz > width * width) continue;
-                    Block b = world.getBlockAt(x + ox, y, z + oz);
-                    boolean rim = ox * ox + oz * oz > (width - 1) * (width - 1);
-                    b.setType(rim ? edge : surface);
+                    int wx = x + ox, wz = z + oz;
 
-                    // Clear headroom so roads cut through hills.
-                    for (int cy = 1; cy <= 4; cy++) {
-                        Block above = world.getBlockAt(x + ox, y + cy, z + oz);
+                    boolean rim = ox * ox + oz * oz > (width - 1) * (width - 1);
+                    world.getBlockAt(wx, y, wz).setType(rim ? edge : surface);
+
+                    // Support underneath, so the road never floats over a dip.
+                    for (int dy = 1; dy <= 4; dy++) {
+                        Block below = world.getBlockAt(wx, y - dy, wz);
+                        if (below.getType() == Material.AIR || below.getType() == Material.WATER) {
+                            below.setType(Material.DIRT);
+                        } else break;
+                    }
+
+                    // Cut headroom, so the road passes through hills and trees.
+                    for (int dy = 1; dy <= 5; dy++) {
+                        Block above = world.getBlockAt(wx, y + dy, wz);
                         if (above.getType() != Material.AIR) above.setType(Material.AIR);
                     }
                 }
             }
 
-            // Occasional lamp posts.
-            if (i % 12 == 0) {
-                world.getBlockAt(x + width + 1, y + 1, z).setType(Material.OAK_FENCE);
-                world.getBlockAt(x + width + 1, y + 2, z).setType(Material.OAK_FENCE);
-                world.getBlockAt(x + width + 1, y + 3, z).setType(Material.LANTERN);
+            // Lamp posts, planted on the verge at road height.
+            if (i % 14 == 0 && i > 0 && i < steps) {
+                int lx = x + width + 1, lz = z;
+                int ly = heights[i];
+                world.getBlockAt(lx, ly, lz).setType(Material.COBBLESTONE);
+                world.getBlockAt(lx, ly + 1, lz).setType(Material.OAK_FENCE);
+                world.getBlockAt(lx, ly + 2, lz).setType(Material.OAK_FENCE);
+                world.getBlockAt(lx, ly + 3, lz).setType(Material.LANTERN);
             }
         }
     }
