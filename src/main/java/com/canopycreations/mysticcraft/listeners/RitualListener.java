@@ -120,6 +120,19 @@ public class RitualListener implements Listener {
         }
     }
 
+    /**
+     * Resolves the living entity a caster is aiming at, or null if they're
+     * pointing at empty air. Used to distinguish targeted gestures (pain,
+     * desiccate, telekinesis) from untargeted ones (heal, boundary).
+     */
+    private LivingEntity rayTarget(Player player) {
+        RayTraceResult result = player.rayTraceEntities(20);
+        if (result != null && result.getHitEntity() instanceof LivingEntity living) {
+            return living;
+        }
+        return null;
+    }
+
     // ==================================================================
     // VAMPIRE: compulsion through sustained eye contact
     // ==================================================================

@@ -40,10 +40,10 @@ public class VampireListener implements Listener {
             player.damage(damage);
             com.canopycreations.mysticcraft.util.Fx.sunlightBurn(player);
             player.sendActionBar("§4You're burning in the sunlight! Find shade or wear your ring.");
-            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.SAW_VAMPIRE_BURN);
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.THE_SUN_AND_THE_RING);
             for (Player near : player.getWorld().getPlayers()) {
                 if (!near.equals(player) && near.getLocation().distance(player.getLocation()) <= 16) {
-                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.SAW_VAMPIRE_BURN);
+                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.THE_SUN_AND_THE_RING);
                 }
             }
         }

@@ -86,7 +86,7 @@ public class WerewolfListener implements Listener {
             toxinExpiry.remove(player.getUniqueId());
             toxinSource.remove(player.getUniqueId());
             player.sendMessage("§6The werewolf venom has run its course... you survived.");
-            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.SURVIVED_WOLF_BITE);
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.THE_VENOM);
             return;
         }
 

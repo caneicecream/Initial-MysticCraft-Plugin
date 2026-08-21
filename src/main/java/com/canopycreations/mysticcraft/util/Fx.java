@@ -80,14 +80,17 @@ public final class Fx {
     public static void howl(Player wolf) {
         World w = wolf.getWorld();
         Location l = wolf.getLocation();
-        w.playSound(l, Sound.ENTITY_WOLF_HOWL, 2.0f, 0.55f);
+        // Note: ENTITY_WOLF_HOWL was restructured out in 1.21.5's wolf sound
+        // variant rework. ENTITY_WOLF_GROWL pitched right down reads as a
+        // howl and is guaranteed to exist on 26.2.
+        w.playSound(l, Sound.ENTITY_WOLF_GROWL, 2.0f, 0.45f);
         // Everyone within earshot hears it, wherever they are.
         for (Player other : w.getPlayers()) {
             if (other.equals(wolf)) continue;
             double d = other.getLocation().distance(l);
             if (d > 120) continue;
             float vol = (float) Math.max(0.15, 1.0 - (d / 120.0));
-            other.playSound(other.getLocation(), Sound.ENTITY_WOLF_HOWL, vol, 0.55f);
+            other.playSound(other.getLocation(), Sound.ENTITY_WOLF_GROWL, vol, 0.45f);
             if (d > 40) other.sendActionBar("§8A howl, somewhere out there.");
         }
     }

@@ -91,10 +91,10 @@ public class SpellManager {
         }
 
         plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.CAST_SPELLS);
-        plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.FIRST_SPELL_CAST);
+        plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.THE_PRICE);
         if (channelers > 0) {
             plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.CHANNEL_WITH_WITCH);
-            plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.CHANNELED_WITH_WITCH);
+            plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.CHANNELING);
         }
 
         data.setLastSpellMillis(System.currentTimeMillis());

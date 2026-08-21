@@ -36,7 +36,7 @@ public class HumanityManager {
         int lowThreshold = plugin.getConfig().getInt("vampire.humanity.low-threshold", 30);
         if (before > lowThreshold && after <= lowThreshold) {
             player.sendMessage("§4Your humanity is slipping. You feel the ripper taking hold...");
-            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.HUMANITY_DROPPED);
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.THE_SWITCH);
         }
         if (after == 0) {
             player.sendMessage("§4§lYou have switched off your humanity. Nothing holds you back now.");

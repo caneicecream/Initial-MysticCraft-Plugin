@@ -71,7 +71,7 @@ public class MoonPhaseManager {
             player.sendTitle("§6The moon calls", "§7You have no control tonight.", 10, 60, 20);
             for (Player near : player.getWorld().getPlayers()) {
                 if (!near.equals(player) && near.getLocation().distance(player.getLocation()) <= 24) {
-                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.NEAR_TRANSFORMATION);
+                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.THE_SLEEPING_CURSE);
                 }
             }
         }
