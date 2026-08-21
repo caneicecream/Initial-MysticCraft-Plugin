@@ -10,8 +10,8 @@
     <packaging>jar</packaging>
 
     <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -20,26 +20,17 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
     </repositories>
 
     <dependencies>
         <dependency>
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
-            <version>1.21.1-R0.1-SNAPSHOT</version>
-            <scope>provided</scope>
-        </dependency>
-        <dependency>
-            <!-- SaberFactions. Compile-time only - at runtime the bridge checks
-                 whether the Factions plugin is actually present before touching
-                 any of these classes, so MysticCraft works fine without it. -->
-            <groupId>com.github.Driftay</groupId>
-            <artifactId>Saber-Factions</artifactId>
-            <version>1.4.1</version>
+            <!-- Pinned to match the exact server build from the enable log
+                 (paper-26.2.jar:26.2-112-c9e894d). Minecraft moved to
+                 year.drop versioning in 2026 - this replaced the old
+                 1.21.x-R0.1-SNAPSHOT scheme entirely. -->
+            <version>26.2.build.112-stable</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>

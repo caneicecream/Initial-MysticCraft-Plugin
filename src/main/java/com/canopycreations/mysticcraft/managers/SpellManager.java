@@ -22,7 +22,7 @@ import java.util.Random;
  */
 public class SpellManager {
 
-    public static final List<String> SPELLS = List.of("heal", "telekinesis", "pain", "boundary", "desiccate");
+    public static final List<String> SPELLS = List.of("heal", "telekinesis", "pain", "boundary", "desiccate", "forgering");
 
     private final MysticCraft plugin;
     private final Random random = new Random();
@@ -61,8 +61,11 @@ public class SpellManager {
             return false;
         }
 
-        if (plugin.getConfig().getBoolean("witch.spellcasting-requires-herb", true) && !consumeHerb(witch)) {
-            witch.sendMessage("§5You need a Spell Herb to channel that.");
+        int herbCost = spell.equals("forgering")
+                ? plugin.getConfig().getInt("witch.ring-forge-herb-cost", 3)
+                : 1;
+        if (plugin.getConfig().getBoolean("witch.spellcasting-requires-herb", true) && !consumeHerbs(witch, herbCost)) {
+            witch.sendMessage("§5You need " + herbCost + " Spell Herb" + (herbCost == 1 ? "" : "s") + " to channel that.");
             return false;
         }
 
@@ -73,7 +76,9 @@ public class SpellManager {
         if (overchannel && random.nextInt(100) < plugin.getConfig().getInt("witch.overchannel-backlash-chance-percent", 20)) {
             double backlash = plugin.getConfig().getDouble("witch.overchannel-backlash-damage", 6.0);
             witch.damage(backlash);
-            witch.sendMessage("§4The magic pushes back - channeling too much power has a cost.");
+            com.canopycreations.mysticcraft.util.Fx.backlash(witch);
+            witch.sendTitle("", "§4The magic pushes back.", 5, 40, 10);
+            plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.SURVIVE_BACKLASH);
         }
 
         switch (spell) {
@@ -82,23 +87,50 @@ public class SpellManager {
             case "pain" -> castPain(witch, target, power);
             case "boundary" -> castBoundary(witch, power);
             case "desiccate" -> castDesiccate(witch, target, power);
+            case "forgering" -> castForgeRing(witch, target);
+        }
+
+        plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.CAST_SPELLS);
+        plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.FIRST_SPELL_CAST);
+        if (channelers > 0) {
+            plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.CHANNEL_WITH_WITCH);
+            plugin.getCodexManager().discover(witch, com.canopycreations.mysticcraft.lore.LoreFragment.CHANNELED_WITH_WITCH);
         }
 
         data.setLastSpellMillis(System.currentTimeMillis());
         data.setSpellsCastToday(data.getSpellsCastToday() + 1);
         plugin.getDataStore().save(data);
+
+        // Mastery of the craft is what makes The Original Witch.
+        if (plugin.getConfig().getBoolean("progenitors.enabled", true)) {
+            int required = plugin.getConfig().getInt("progenitors.original-witch-requires-spells", 50);
+            if (data.getSpellsCastToday() >= required) {
+                plugin.getProgenitorManager().claim(witch,
+                        com.canopycreations.mysticcraft.lore.Progenitor.THE_ORIGINAL_WITCH);
+            }
+        }
         return true;
     }
 
-    private boolean consumeHerb(Player witch) {
+    private boolean consumeHerbs(Player witch, int amount) {
         MysticItems items = plugin.getMysticItems();
+        int available = 0;
         for (ItemStack stack : witch.getInventory().getContents()) {
             if (items.hasTag(stack, MysticItems.TAG_WITCH_HERB)) {
-                stack.setAmount(stack.getAmount() - 1);
-                return true;
+                available += stack.getAmount();
             }
         }
-        return false;
+        if (available < amount) return false;
+
+        int remaining = amount;
+        for (ItemStack stack : witch.getInventory().getContents()) {
+            if (remaining <= 0) break;
+            if (!items.hasTag(stack, MysticItems.TAG_WITCH_HERB)) continue;
+            int take = Math.min(remaining, stack.getAmount());
+            stack.setAmount(stack.getAmount() - take);
+            remaining -= take;
+        }
+        return true;
     }
 
     private int countNearbyWitches(Player witch) {
@@ -113,7 +145,7 @@ public class SpellManager {
     }
 
     private void castHeal(Player witch, double power) {
-        double maxHealth = witch.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+        double maxHealth = witch.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
         witch.setHealth(Math.min(maxHealth, witch.getHealth() + 6.0 * power));
         witch.sendMessage("§aYou channel restorative magic through yourself.");
     }
@@ -149,6 +181,7 @@ public class SpellManager {
         int durationTicks = 20 * 30; // 30 seconds
         witch.sendMessage("§5You draw a boundary spell - vampires cannot cross it for 30 seconds.");
         plugin.registerBoundary(witch.getLocation(), radius, System.currentTimeMillis() + durationTicks * 50L);
+        com.canopycreations.mysticcraft.util.Fx.boundaryWall(witch.getLocation(), radius);
     }
 
     private void castDesiccate(Player witch, LivingEntity target, double power) {
@@ -165,5 +198,18 @@ public class SpellManager {
         targetPlayer.damage(2.0 * power);
         targetPlayer.sendMessage("§5Your veins dry up - a witch is desiccating you!");
         witch.sendMessage("§5You draw the moisture from their very veins.");
+    }
+
+    private void castForgeRing(Player witch, LivingEntity target) {
+        if (!(target instanceof Player targetPlayer) || plugin.getRaceManager().getRace(targetPlayer) != Race.VAMPIRE) {
+            witch.sendMessage("§5Forging a Daylight Ring requires a vampire target - look at them when casting.");
+            return;
+        }
+        ItemStack ring = plugin.getMysticItems().daylightRing();
+        targetPlayer.getInventory().addItem(ring);
+        com.canopycreations.mysticcraft.util.Fx.ringForged(witch, targetPlayer);
+        targetPlayer.sendTitle("", "§6A Daylight Ring, forged for you.", 10, 50, 15);
+        witch.sendMessage("§5You channel old magic, binding sun-ward protection into a ring for " + targetPlayer.getName() + ".");
+        plugin.getQuestManager().progress(witch, com.canopycreations.mysticcraft.quests.Questline.Objective.FORGE_RING);
     }
 }

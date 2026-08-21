@@ -16,12 +16,17 @@ public class JoinQuitListener implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
+        // Silently rolls the latent werewolf gene on a player's very first join.
+        // Deliberately says nothing - a carrier is not supposed to know.
+        plugin.getBloodlineManager().rollIfNeeded(event.getPlayer());
+
         // Loads (or creates) their PlayerData and applies race-appropriate attributes.
         plugin.getRaceManager().refreshAttributes(event.getPlayer());
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
+        plugin.getBloodlineManager().clear(event.getPlayer().getUniqueId());
         plugin.getRaceManager().unload(event.getPlayer());
     }
 }

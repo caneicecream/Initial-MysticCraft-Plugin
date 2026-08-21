@@ -1,0 +1,634 @@
+package com.canopycreations.mysticcraft.world;
+
+import com.canopycreations.mysticcraft.MysticCraft;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
+import org.bukkit.scheduler.BukkitRunnable;
+
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+
+/**
+ * Builds the town of Ashfall.
+ *
+ * Generated in stages across ticks rather than all at once - a 250x250 build
+ * done synchronously will hang the server for several seconds and may trip
+ * watchdog. Each stage reports progress so you can watch it go up.
+ *
+ * Seeded: the same seed produces the same town, so you can re-roll until you
+ * get a layout you like and then keep it. Landmark POSITIONS are fixed
+ * (the mechanics depend on a coherent geography), but building footprints,
+ * materials, weathering, filler houses and road routing all vary.
+ */
+public class TownGenerator {
+
+    private final MysticCraft plugin;
+
+    /** Landmark offsets from town centre. Fixed, so the geography reads consistently. */
+    private static final Map<Landmark, int[]> LAYOUT = new EnumMap<>(Landmark.class);
+    static {
+        LAYOUT.put(Landmark.TOWN_SQUARE,        new int[]{   0,    0});
+        LAYOUT.put(Landmark.THE_KETTLE,         new int[]{  28,   12});
+        LAYOUT.put(Landmark.THE_BOARDING_HOUSE, new int[]{ -74,  -58});
+        LAYOUT.put(Landmark.LOCKRIDGE_MANOR,    new int[]{  88,  -62});
+        LAYOUT.put(Landmark.THE_HEDGE_HOUSE,    new int[]{ -58,   74});
+        LAYOUT.put(Landmark.THE_BURNED_CHURCH,  new int[]{  16,  -88});
+        LAYOUT.put(Landmark.THE_TOMB,           new int[]{  16,  -88});
+        LAYOUT.put(Landmark.WICKER_BRIDGE,      new int[]{ 112,   48});
+        LAYOUT.put(Landmark.THE_WHITE_OAK,      new int[]{ -32, -124});
+        LAYOUT.put(Landmark.THE_QUARRY,         new int[]{-134,   22});
+        LAYOUT.put(Landmark.THE_OLD_CEMETERY,   new int[]{  42, -112});
+    }
+
+    /** Palettes so buildings vary but stay in one architectural family. */
+    private static final Material[][] PALETTES = {
+            {Material.SPRUCE_PLANKS, Material.SPRUCE_LOG, Material.SPRUCE_STAIRS, Material.DEEPSLATE_TILES},
+            {Material.OAK_PLANKS, Material.OAK_LOG, Material.OAK_STAIRS, Material.DEEPSLATE_TILES},
+            {Material.DARK_OAK_PLANKS, Material.DARK_OAK_LOG, Material.DARK_OAK_STAIRS, Material.DEEPSLATE_BRICKS},
+            {Material.STRIPPED_SPRUCE_WOOD, Material.SPRUCE_LOG, Material.SPRUCE_STAIRS, Material.TUFF_BRICKS}
+    };
+
+    public TownGenerator(MysticCraft plugin) {
+        this.plugin = plugin;
+    }
+
+    /**
+     * Kicks off a staged build. Returns immediately; progress is reported to
+     * the requesting player as each stage lands.
+     */
+    public void generate(Location center, Player feedback, long seed) {
+        World world = center.getWorld();
+        Random rng = new Random(seed);
+        Blueprint bp = new Blueprint(world, rng);
+
+        List<Runnable> stages = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+
+        // --- Stage 1: landmarks ---
+        for (Map.Entry<Landmark, int[]> entry : LAYOUT.entrySet()) {
+            Landmark landmark = entry.getKey();
+            int[] off = entry.getValue();
+            stages.add(() -> {
+                Location spot = center.clone().add(off[0], 0, off[1]);
+                spot.setY(world.getHighestBlockYAt(spot));
+                try {
+                    build(world, bp, rng, spot, landmark);
+                    plugin.getLandmarkManager().setLocation(landmark, spot, radiusFor(landmark));
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed building " + landmark + ": " + e.getMessage());
+                }
+            });
+            labels.add(landmark.getFormattedName());
+        }
+
+        // --- Stage 2: roads out from the square ---
+        stages.add(() -> {
+            int cx = center.getBlockX(), cz = center.getBlockZ();
+            for (Map.Entry<Landmark, int[]> e : LAYOUT.entrySet()) {
+                if (e.getKey() == Landmark.TOWN_SQUARE || e.getKey() == Landmark.THE_TOMB) continue;
+                int[] off = e.getValue();
+                boolean major = e.getKey() == Landmark.THE_KETTLE
+                        || e.getKey() == Landmark.THE_BURNED_CHURCH
+                        || e.getKey() == Landmark.LOCKRIDGE_MANOR;
+                bp.road(cx, cz, cx + off[0], cz + off[1], major ? 3 : 2,
+                        major ? Material.DIRT_PATH : Material.COARSE_DIRT,
+                        Material.COBBLESTONE);
+            }
+        });
+        labels.add("§7roads");
+
+        // --- Stage 3: filler houses along the roads ---
+        stages.add(() -> {
+            int cx = center.getBlockX(), cz = center.getBlockZ();
+            int houses = 14 + rng.nextInt(8);
+            for (int i = 0; i < houses; i++) {
+                double angle = rng.nextDouble() * Math.PI * 2;
+                double dist = 30 + rng.nextDouble() * 70;
+                int x = cx + (int) (Math.cos(angle) * dist);
+                int z = cz + (int) (Math.sin(angle) * dist);
+
+                Location spot = new Location(world, x, 0, z);
+                spot.setY(world.getHighestBlockYAt(spot));
+
+                // Don't drop a cottage on top of a landmark.
+                if (plugin.getLandmarkManager().landmarkAt(spot) != null) continue;
+
+                try {
+                    fillerHouse(world, bp, rng, spot);
+                } catch (Exception ignored) {
+                    // a failed filler house isn't worth aborting the town for
+                }
+            }
+        });
+        labels.add("§7outlying houses");
+
+        // Run the stages one per tick so the server keeps breathing.
+        new BukkitRunnable() {
+            int index = 0;
+
+            @Override
+            public void run() {
+                if (index >= stages.size()) {
+                    if (feedback != null) {
+                        feedback.sendMessage("");
+                        feedback.sendMessage("§aAshfall stands. §8seed: §7" + seed);
+                        feedback.sendMessage("§8Re-roll with §7/mystic town confirm <seed>§8 elsewhere,");
+                        feedback.sendMessage("§8or re-point landmarks onto your own builds with");
+                        feedback.sendMessage("§8§7/mystic landmark set <name>§8.");
+                    }
+                    plugin.getLandmarkManager().save();
+                    cancel();
+                    return;
+                }
+                stages.get(index).run();
+                if (feedback != null && index < labels.size()) {
+                    feedback.sendActionBar("§8Building Ashfall... " + labels.get(index));
+                }
+                index++;
+            }
+        }.runTaskTimer(plugin, 5L, 2L);
+    }
+
+    private int radiusFor(Landmark landmark) {
+        return switch (landmark) {
+            case TOWN_SQUARE, THE_QUARRY, THE_OLD_CEMETERY -> 32;
+            case THE_WHITE_OAK -> 18;
+            case THE_TOMB -> 12;
+            default -> 24;
+        };
+    }
+
+    private void build(World world, Blueprint bp, Random rng, Location at, Landmark landmark) {
+        int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
+
+        switch (landmark) {
+            case TOWN_SQUARE -> square(world, bp, rng, x, y, z);
+            case THE_KETTLE -> tavern(world, bp, rng, x, y, z);
+            case THE_BOARDING_HOUSE -> manor(world, bp, rng, x, y, z, true);
+            case LOCKRIDGE_MANOR -> manor(world, bp, rng, x, y, z, false);
+            case THE_HEDGE_HOUSE -> hedgeHouse(world, bp, rng, x, y, z);
+            case THE_BURNED_CHURCH -> ruinedChurch(world, bp, rng, x, y, z);
+            case THE_TOMB -> tomb(world, x, y, z);
+            case WICKER_BRIDGE -> bridge(world, x, y, z);
+            case THE_WHITE_OAK -> whiteOak(world, rng, x, y, z);
+            case THE_QUARRY -> quarry(world, rng, x, y, z);
+            case THE_OLD_CEMETERY -> cemetery(world, bp, rng, x, y, z);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Landmarks
+    // ------------------------------------------------------------------
+
+    private void square(World world, Blueprint bp, Random rng, int x, int y, int z) {
+        // Circular plaza with a radial paving pattern
+        for (int dx = -14; dx <= 14; dx++) {
+            for (int dz = -14; dz <= 14; dz++) {
+                double d = Math.sqrt(dx * dx + dz * dz);
+                if (d > 14) continue;
+                Block b = world.getBlockAt(x + dx, y - 1, z + dz);
+                b.setType(d < 4 ? Material.POLISHED_ANDESITE
+                        : ((dx + dz) % 4 == 0 ? Material.STONE_BRICKS : Material.SMOOTH_STONE));
+                for (int cy = 0; cy < 8; cy++) {
+                    Block above = world.getBlockAt(x + dx, y + cy, z + dz);
+                    if (above.getType() != Material.AIR) above.setType(Material.AIR);
+                }
+            }
+        }
+
+        // Clock tower
+        int h = 20;
+        bp.prepareSite(x, y, z, 3, 3, Material.STONE_BRICKS);
+        for (int cy = 0; cy < h; cy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    boolean edge = Math.abs(dx) == 2 || Math.abs(dz) == 2;
+                    if (!edge) continue;
+                    Material m = (cy % 5 == 4) ? Material.POLISHED_ANDESITE : Material.STONE_BRICKS;
+                    world.getBlockAt(x + dx, y + cy, z + dz).setType(m);
+                }
+            }
+        }
+        // Clock faces on all four sides, hands stopped
+        for (int[] face : new int[][]{{0, -2}, {0, 2}, {-2, 0}, {2, 0}}) {
+            world.getBlockAt(x + face[0] * 1, y + h - 5, z + face[1] * 1).setType(Material.WHITE_CONCRETE);
+            world.getBlockAt(x + face[0], y + h - 4, z + face[1]).setType(Material.WHITE_CONCRETE);
+            world.getBlockAt(x + face[0], y + h - 3, z + face[1]).setType(Material.BLACK_CONCRETE);
+        }
+        bp.gableRoof(x, y + h, z, 3, 3, Material.DEEPSLATE_TILE_STAIRS, Material.DEEPSLATE_TILES);
+        bp.weather(x, y, z, 3, 3, h, 0.15);
+
+        // Benches and lamps ringing the plaza
+        for (int i = 0; i < 8; i++) {
+            double a = (Math.PI * 2 / 8) * i;
+            int bx = x + (int) (Math.cos(a) * 10);
+            int bz = z + (int) (Math.sin(a) * 10);
+            world.getBlockAt(bx, y, bz).setType(Material.OAK_STAIRS);
+            world.getBlockAt(bx + 1, y, bz).setType(Material.OAK_STAIRS);
+            if (i % 2 == 0) {
+                world.getBlockAt(bx, y, bz + 2).setType(Material.OAK_FENCE);
+                world.getBlockAt(bx, y + 1, bz + 2).setType(Material.OAK_FENCE);
+                world.getBlockAt(bx, y + 2, bz + 2).setType(Material.LANTERN);
+            }
+        }
+    }
+
+    private void tavern(World world, Blueprint bp, Random rng, int x, int y, int z) {
+        int hw = 7, hl = 6, h = 7;
+        bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
+        bp.walls(x, y, z, hw, hl, h, Material.SPRUCE_PLANKS, Material.SPRUCE_LOG, Material.GLASS_PANE);
+        bp.door(x, y, z, hl, Material.SPRUCE_DOOR);
+        bp.porch(x, y, z - hl, 4, Material.SPRUCE_FENCE, Material.SPRUCE_SLAB);
+        bp.gableRoof(x, y + h, z, hw, hl, Material.DARK_OAK_STAIRS, Material.DARK_OAK_PLANKS);
+        bp.chimney(x + hw - 2, y + h, z + hl - 2, 5, Material.BRICKS);
+        bp.foundationSkirt(x, y, z, hw, hl, Material.COBBLESTONE);
+
+        // Bar interior
+        for (int dx = -4; dx <= 4; dx++) {
+            world.getBlockAt(x + dx, y, z + 3).setType(Material.SPRUCE_SLAB);
+            world.getBlockAt(x + dx, y - 1, z + 3).setType(Material.SPRUCE_PLANKS);
+        }
+        world.getBlockAt(x - 2, y, z + 4).setType(Material.BARREL);
+        world.getBlockAt(x + 2, y, z + 4).setType(Material.BREWING_STAND);
+        for (int dx = -3; dx <= 3; dx += 3) {
+            world.getBlockAt(x + dx, y, z - 2).setType(Material.OAK_STAIRS);
+            world.getBlockAt(x + dx, y + 1, z - 2).setType(Material.AIR);
+        }
+        world.getBlockAt(x, y + 4, z).setType(Material.LANTERN);
+        bp.weather(x, y, z, hw, hl, h, 0.08);
+    }
+
+    private void manor(World world, Blueprint bp, Random rng, int x, int y, int z, boolean dark) {
+        Material wall = dark ? Material.DARK_OAK_PLANKS : Material.STRIPPED_OAK_WOOD;
+        Material post = dark ? Material.DARK_OAK_LOG : Material.OAK_LOG;
+        Material stair = dark ? Material.DARK_OAK_STAIRS : Material.OAK_STAIRS;
+        Material roof = dark ? Material.DEEPSLATE_TILES : Material.TUFF_BRICKS;
+
+        int hw = 10, hl = 8, h = 13;
+        bp.prepareSite(x, y, z, hw, hl, Material.STONE_BRICKS);
+        bp.walls(x, y, z, hw, hl, h, wall, post, Material.GLASS_PANE);
+        bp.door(x, y, z, hl, dark ? Material.DARK_OAK_DOOR : Material.OAK_DOOR);
+        bp.porch(x, y, z - hl, 5, post, dark ? Material.DARK_OAK_SLAB : Material.OAK_SLAB);
+        bp.gableRoof(x, y + h, z, hw, hl, stair, roof);
+        bp.chimney(x - hw + 2, y + h, z + hl - 3, 7, Material.DEEPSLATE_BRICKS);
+        bp.chimney(x + hw - 3, y + h, z + hl - 3, 6, Material.DEEPSLATE_BRICKS);
+        bp.foundationSkirt(x, y, z, hw, hl, Material.STONE_BRICKS);
+
+        // Side wing
+        int wx = x + hw + 5;
+        bp.prepareSite(wx, y, z + 3, 5, 5, Material.STONE_BRICKS);
+        bp.walls(wx, y, z + 3, 5, 5, 8, wall, post, Material.GLASS_PANE);
+        bp.gableRoof(wx, y + 8, z + 3, 5, 5, stair, roof);
+
+        // Interior floors
+        for (int dx = -hw + 1; dx < hw; dx++) {
+            for (int dz = -hl + 1; dz < hl; dz++) {
+                world.getBlockAt(x + dx, y + 5, z + dz).setType(wall);
+            }
+        }
+        bp.furnish(x, y, z, hw - 2, hl - 2, true);
+        bp.furnish(x, y + 6, z, hw - 2, hl - 2, true);
+        bp.weather(x, y, z, hw, hl, h, dark ? 0.2 : 0.1);
+    }
+
+    private void hedgeHouse(World world, Blueprint bp, Random rng, int x, int y, int z) {
+        int hw = 5, hl = 5, h = 6;
+        bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
+        bp.walls(x, y, z, hw, hl, h, Material.OAK_PLANKS, Material.OAK_LOG, Material.GLASS_PANE);
+        bp.door(x, y, z, hl, Material.OAK_DOOR);
+        bp.gableRoof(x, y + h, z, hw, hl, Material.OAK_STAIRS, Material.MOSSY_COBBLESTONE);
+        bp.chimney(x + hw - 2, y + h, z + hl - 2, 4, Material.COBBLESTONE);
+        bp.furnish(x, y, z, hw - 1, hl - 1, true);
+
+        // Herb garden - the tell
+        for (int dx = -7; dx <= 7; dx++) {
+            for (int dz = hl + 2; dz <= hl + 7; dz++) {
+                Block soil = world.getBlockAt(x + dx, y - 1, z + dz);
+                soil.setType(Material.FARMLAND);
+                Block crop = soil.getRelative(BlockFace.UP);
+                crop.setType(switch (rng.nextInt(4)) {
+                    case 0 -> Material.NETHER_WART;
+                    case 1 -> Material.SWEET_BERRY_BUSH;
+                    case 2 -> Material.PUMPKIN_STEM;
+                    default -> Material.WHEAT;
+                });
+            }
+        }
+        // Salt line across the threshold
+        for (int dx = -3; dx <= 3; dx++) {
+            world.getBlockAt(x + dx, y - 1, z - hl - 1).setType(Material.CALCITE);
+        }
+        // Drying racks
+        for (int dx = -hw; dx <= hw; dx += 3) {
+            world.getBlockAt(x + dx, y + 4, z - hl).setType(Material.OAK_FENCE);
+        }
+        bp.weather(x, y, z, hw, hl, h, 0.25);
+        bp.overgrow(x, y, z, hw, hl, h, 0.06);
+    }
+
+    private void ruinedChurch(World world, Blueprint bp, Random rng, int x, int y, int z) {
+        int hw = 9, hl = 14;
+        bp.prepareSite(x, y, z, hw, hl, Material.CRACKED_STONE_BRICKS);
+
+        // Broken walls with random surviving height
+        for (int dx = -hw; dx <= hw; dx++) {
+            for (int dz = -hl; dz <= hl; dz++) {
+                boolean edge = Math.abs(dx) == hw || Math.abs(dz) == hl;
+                world.getBlockAt(x + dx, y - 1, z + dz)
+                        .setType(rng.nextInt(6) == 0 ? Material.BLACKSTONE : Material.CRACKED_STONE_BRICKS);
+                if (!edge) continue;
+
+                // Height falls off toward the middle of each wall - reads as collapse
+                double along = Math.abs(dx) == hw ? (double) dz / hl : (double) dx / hw;
+                int max = (int) (3 + Math.abs(along) * 8) + rng.nextInt(3);
+                for (int cy = 0; cy < max; cy++) {
+                    Material m = rng.nextInt(3) == 0 ? Material.MOSSY_STONE_BRICKS : Material.CRACKED_STONE_BRICKS;
+                    world.getBlockAt(x + dx, y + cy, z + dz).setType(m);
+                }
+            }
+        }
+
+        // Surviving apse arch at the north end
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int cy = 0; cy < 9; cy++) {
+                if (Math.abs(dx) == 3 || cy == 8) {
+                    world.getBlockAt(x + dx, y + cy, z - hl).setType(Material.MOSSY_STONE_BRICKS);
+                }
+            }
+        }
+
+        // The fallen bell, and the hole it went through
+        world.getBlockAt(x + 3, y - 1, z - 6).setType(Material.BELL);
+        for (int dx = 2; dx <= 4; dx++) {
+            for (int dz = -7; dz <= -5; dz++) {
+                world.getBlockAt(x + dx, y - 1, z + dz).setType(Material.AIR);
+                world.getBlockAt(x + dx, y - 2, z + dz).setType(Material.DEEPSLATE_BRICKS);
+            }
+        }
+
+        // Pews, mostly destroyed
+        for (int dz = -8; dz <= 8; dz += 3) {
+            if (rng.nextInt(3) == 0) continue;
+            for (int dx = -5; dx <= 5; dx++) {
+                if (rng.nextInt(4) == 0) continue;
+                world.getBlockAt(x + dx, y, z + dz).setType(Material.OAK_STAIRS);
+            }
+        }
+        bp.overgrow(x, y, z, hw, hl, 10, 0.1);
+    }
+
+    private void tomb(World world, int x, int y, int z) {
+        int ty = Math.max(world.getMinHeight() + 14, y - 24);
+        for (int dx = -8; dx <= 8; dx++) {
+            for (int dz = -8; dz <= 8; dz++) {
+                for (int dy = 0; dy < 7; dy++) {
+                    boolean shell = Math.abs(dx) == 8 || Math.abs(dz) == 8 || dy == 0 || dy == 6;
+                    world.getBlockAt(x + dx, ty + dy, z + dz)
+                            .setType(shell ? Material.DEEPSLATE_BRICKS : Material.AIR);
+                }
+            }
+        }
+        // Alcoves along the walls - something was kept in each
+        for (int dz = -6; dz <= 6; dz += 3) {
+            for (int side : new int[]{-7, 7}) {
+                world.getBlockAt(x + side, ty + 1, z + dz).setType(Material.AIR);
+                world.getBlockAt(x + side, ty + 2, z + dz).setType(Material.AIR);
+                world.getBlockAt(x + side, ty + 1, z + dz).setType(Material.SOUL_LANTERN);
+            }
+        }
+        // The seal
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = 1; dy <= 3; dy++) {
+                world.getBlockAt(x + dx, ty + dy, z + 8).setType(Material.REINFORCED_DEEPSLATE);
+            }
+        }
+        // Shaft up to the church floor
+        for (int dy = ty + 7; dy < y; dy++) {
+            world.getBlockAt(x + 3, dy, z - 6).setType(Material.AIR);
+            world.getBlockAt(x + 3, dy, z - 5).setType(Material.LADDER);
+        }
+    }
+
+    private void bridge(World world, int x, int y, int z) {
+        // River channel
+        for (int dz = -26; dz <= 26; dz++) {
+            for (int dx = -6; dx <= 6; dx++) {
+                double edge = Math.abs(dx) / 6.0;
+                int depth = (int) (3 * (1 - edge)) + 1;
+                for (int dy = 0; dy < depth; dy++) {
+                    world.getBlockAt(x + dx, y - 1 - dy, z + dz).setType(Material.WATER);
+                }
+                world.getBlockAt(x + dx, y - 1 - depth, z + dz).setType(Material.GRAVEL);
+                for (int dy = 0; dy < 6; dy++) {
+                    Block b = world.getBlockAt(x + dx, y + dy, z + dz);
+                    if (b.getType() != Material.AIR) b.setType(Material.AIR);
+                }
+            }
+        }
+        // Deck with supports
+        for (int dz = -10; dz <= 10; dz++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                world.getBlockAt(x + dx, y + 1, z + dz).setType(Material.OAK_PLANKS);
+            }
+            world.getBlockAt(x - 4, y + 2, z + dz).setType(Material.OAK_FENCE);
+            world.getBlockAt(x + 4, y + 2, z + dz).setType(Material.OAK_FENCE);
+            if (dz % 5 == 0) {
+                for (int dy = -4; dy <= 0; dy++) {
+                    world.getBlockAt(x - 3, y + dy, z + dz).setType(Material.OAK_LOG);
+                    world.getBlockAt(x + 3, y + dy, z + dz).setType(Material.OAK_LOG);
+                }
+                world.getBlockAt(x - 4, y + 3, z + dz).setType(Material.LANTERN);
+            }
+        }
+    }
+
+    private void whiteOak(World world, Random rng, int x, int y, int z) {
+        // Clear a glade
+        for (int dx = -12; dx <= 12; dx++) {
+            for (int dz = -12; dz <= 12; dz++) {
+                if (dx * dx + dz * dz > 144) continue;
+                for (int dy = 0; dy < 30; dy++) {
+                    Block b = world.getBlockAt(x + dx, y + dy, z + dz);
+                    if (b.getType() != Material.AIR) b.setType(Material.AIR);
+                }
+                world.getBlockAt(x + dx, y - 1, z + dz).setType(Material.PODZOL);
+            }
+        }
+
+        // Trunk - wide at the base, tapering
+        int height = 26;
+        for (int dy = 0; dy < height; dy++) {
+            int r = dy < 4 ? 2 : (dy < 12 ? 1 : 1);
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (dy > 6 && (Math.abs(dx) + Math.abs(dz)) > 1) continue;
+                    world.getBlockAt(x + dx, y + dy, z + dz).setType(Material.PALE_OAK_LOG);
+                }
+            }
+        }
+
+        // Boughs
+        for (int i = 0; i < 6; i++) {
+            double a = (Math.PI * 2 / 6) * i + rng.nextDouble() * 0.4;
+            int by = y + height - 10 + rng.nextInt(6);
+            for (int step = 1; step <= 6; step++) {
+                int bx = x + (int) (Math.cos(a) * step);
+                int bz = z + (int) (Math.sin(a) * step);
+                world.getBlockAt(bx, by + step / 3, bz).setType(Material.PALE_OAK_LOG);
+            }
+        }
+
+        // Canopy
+        for (int dy = height - 10; dy < height + 5; dy++) {
+            int r = 10 - Math.abs(dy - (height - 3));
+            if (r <= 0) continue;
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (dx * dx + dz * dz > r * r) continue;
+                    if (rng.nextInt(8) == 0) continue;
+                    Block b = world.getBlockAt(x + dx, y + dy, z + dz);
+                    if (b.getType() == Material.AIR) b.setType(Material.PALE_OAK_LEAVES);
+                }
+            }
+        }
+
+        // Old stone ring - somebody marked this a very long time ago
+        for (int i = 0; i < 40; i++) {
+            double a = (Math.PI * 2 / 40) * i;
+            int sx = x + (int) Math.round(Math.cos(a) * 8);
+            int sz = z + (int) Math.round(Math.sin(a) * 8);
+            world.getBlockAt(sx, y - 1, sz).setType(Material.MOSSY_COBBLESTONE);
+            if (i % 5 == 0) {
+                world.getBlockAt(sx, y, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
+                world.getBlockAt(sx, y + 1, sz).setType(Material.MOSSY_COBBLESTONE_WALL);
+            }
+        }
+    }
+
+    private void quarry(World world, Random rng, int x, int y, int z) {
+        int r = 26;
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                double d = Math.sqrt(dx * dx + dz * dz);
+                if (d > r) continue;
+                int depth = (int) ((r - d) * 0.75);
+                // Stepped terraces read as an excavation rather than a crater
+                int terrace = (depth / 4) * 4;
+                for (int dy = 0; dy <= terrace; dy++) {
+                    world.getBlockAt(x + dx, y - dy, z + dz)
+                            .setType(dy > terrace - 7 ? Material.WATER : Material.AIR);
+                }
+                if (terrace > 0) {
+                    world.getBlockAt(x + dx, y - terrace - 1, z + dz)
+                            .setType(rng.nextInt(8) == 0 ? Material.ANDESITE : Material.STONE);
+                }
+            }
+        }
+        // Rusted fencing around the rim
+        for (int i = 0; i < 60; i++) {
+            double a = (Math.PI * 2 / 60) * i;
+            int fx = x + (int) (Math.cos(a) * (r + 2));
+            int fz = z + (int) (Math.sin(a) * (r + 2));
+            int fy = world.getHighestBlockYAt(fx, fz);
+            if (rng.nextInt(6) == 0) continue; // gaps in the fence
+            world.getBlockAt(fx, fy, fz).setType(Material.IRON_BARS);
+            world.getBlockAt(fx, fy + 1, fz).setType(Material.IRON_BARS);
+        }
+    }
+
+    private void cemetery(World world, Blueprint bp, Random rng, int x, int y, int z) {
+        // Iron fence perimeter
+        for (int dx = -20; dx <= 20; dx++) {
+            for (int dz = -20; dz <= 20; dz++) {
+                boolean edge = Math.abs(dx) == 20 || Math.abs(dz) == 20;
+                if (!edge) continue;
+                if (dx == 0 && dz == 20) continue; // gate
+                int fy = world.getHighestBlockYAt(x + dx, z + dz);
+                world.getBlockAt(x + dx, fy, z + dz).setType(Material.IRON_BARS);
+                world.getBlockAt(x + dx, fy + 1, z + dz).setType(Material.IRON_BARS);
+            }
+        }
+
+        // Rows of headstones
+        for (int dx = -16; dx <= 16; dx += 4) {
+            for (int dz = -16; dz <= 14; dz += 5) {
+                if (rng.nextInt(7) == 0) continue;
+                int gy = world.getHighestBlockYAt(x + dx, z + dz);
+                Material stone = rng.nextInt(4) == 0 ? Material.MOSSY_COBBLESTONE_WALL : Material.STONE_BRICK_WALL;
+                world.getBlockAt(x + dx, gy + 1, z + dz).setType(stone);
+                if (rng.nextInt(3) == 0) {
+                    world.getBlockAt(x + dx, gy + 2, z + dz).setType(Material.STONE_BRICK_SLAB);
+                }
+                // Disturbed earth on a few plots
+                if (rng.nextInt(12) == 0) {
+                    world.getBlockAt(x + dx, gy, z + dz + 1).setType(Material.COARSE_DIRT);
+                }
+            }
+        }
+
+        // Founders' mausoleum at the top of the hill
+        int my = world.getHighestBlockYAt(x, z - 18);
+        bp.prepareSite(x, my, z - 18, 4, 4, Material.POLISHED_DEEPSLATE);
+        bp.walls(x, my, z - 18, 4, 4, 6, Material.POLISHED_DEEPSLATE,
+                Material.DEEPSLATE_BRICKS, null);
+        bp.door(x, my, z - 18, 4, Material.IRON_DOOR);
+        bp.gableRoof(x, my + 6, z - 18, 4, 4, Material.DEEPSLATE_TILE_STAIRS, Material.DEEPSLATE_TILES);
+        bp.weather(x, my, z - 18, 4, 4, 6, 0.3);
+    }
+
+    // ------------------------------------------------------------------
+    // Filler
+    // ------------------------------------------------------------------
+
+    private void fillerHouse(World world, Blueprint bp, Random rng, Location at) {
+        int x = at.getBlockX(), y = at.getBlockY(), z = at.getBlockZ();
+        Material[] palette = PALETTES[rng.nextInt(PALETTES.length)];
+
+        int hw = 4 + rng.nextInt(3);
+        int hl = 4 + rng.nextInt(3);
+        int h = 5 + rng.nextInt(3);
+        boolean abandoned = rng.nextInt(6) == 0;
+
+        bp.prepareSite(x, y, z, hw, hl, Material.COBBLESTONE);
+        bp.walls(x, y, z, hw, hl, h, palette[0], palette[1], abandoned ? null : Material.GLASS_PANE);
+        bp.door(x, y, z, hl, Material.OAK_DOOR);
+        bp.gableRoof(x, y + h, z, hw, hl, palette[2], palette[3]);
+        bp.foundationSkirt(x, y, z, hw, hl, Material.COBBLESTONE);
+
+        if (rng.nextBoolean()) {
+            bp.chimney(x + hw - 2, y + h, z + hl - 2, 4, Material.BRICKS);
+        }
+        if (rng.nextInt(3) == 0) {
+            bp.porch(x, y, z - hl, 3, palette[1], Material.OAK_SLAB);
+        }
+
+        bp.furnish(x, y, z, hw - 1, hl - 1, !abandoned);
+        bp.weather(x, y, z, hw, hl, h, abandoned ? 0.4 : 0.1);
+        if (abandoned) {
+            bp.overgrow(x, y, z, hw, hl, h, 0.12);
+            // Punch a hole in the roof
+            for (int i = 0; i < 6; i++) {
+                world.getBlockAt(x + rng.nextInt(5) - 2, y + h, z + rng.nextInt(5) - 2).setType(Material.AIR);
+            }
+        }
+
+        // Fenced yard
+        if (rng.nextBoolean()) {
+            for (int dx = -hw - 3; dx <= hw + 3; dx++) {
+                for (int dz = -hl - 3; dz <= hl + 3; dz++) {
+                    boolean edge = Math.abs(dx) == hw + 3 || Math.abs(dz) == hl + 3;
+                    if (!edge || rng.nextInt(8) == 0) continue;
+                    int fy = world.getHighestBlockYAt(x + dx, z + dz);
+                    world.getBlockAt(x + dx, fy, z + dz).setType(Material.OAK_FENCE);
+                }
+            }
+        }
+    }
+}

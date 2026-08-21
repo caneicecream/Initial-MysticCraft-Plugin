@@ -42,6 +42,10 @@ public class WerewolfCommand implements CommandExecutor {
     }
 
     private void shift(Player player, PlayerData data) {
+        player.sendMessage("§8You don't call the wolf with words.");
+        player.sendMessage("§7Crouch under a night sky, look straight up, and hold it.");
+        player.sendMessage("§8They'll hear you for a hundred blocks.");
+        player.sendMessage("");
         if (!data.hasTriggeredCurse()) {
             player.sendMessage("§6You haven't triggered the curse yet. Until you take a human life, the wolf stays dormant.");
             return;

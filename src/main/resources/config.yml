@@ -19,6 +19,7 @@ vampire:
   compulsion-cooldown-seconds: 90
   compulsion-range: 5.0
   compulsion-requires-eye-contact: true
+  compulsion-hold-ticks: 40   # how long mutual eye contact must be held before compulsion lands
   stake-instakill: true
   fire-instakill: true
   decapitation-instakill: true
@@ -27,11 +28,22 @@ vampire:
     start: 100
     low-threshold: 30       # below this = "ripper" mode buffs but random rage triggers
     ripper-rage-chance-percent: 5
+  turning:
+    blood-window-minutes: 60         # how long shared vampire blood stays active in a human before it wears off
+    transition-window-minutes: 60    # how long a transitioning vampire has to feed on a human before permanent death
+  originals:
+    slot-count: 8   # first N vampires (admin-seeded or naturally turned) get a free Daylight Ring
 
 werewolf:
   strength-amplifier: 2
   speed-amplifier: 1
   regen-amplifier: 1
+  latent-gene:
+    chance-percent: 8.0              # % of new players who silently carry the werewolf bloodline
+    scent-detection-enabled: true
+    scent-radius: 12.0               # how close a triggered werewolf must be to start catching the scent
+    scent-seconds-required: 120      # continuous-ish proximity time before the first hint fires
+    scent-hint-cooldown-seconds: 300 # minimum gap between scent hints for a given werewolf
   wolfsbane-damage: 8.0
   wolfsbane-weaken-seconds: 15
   silver-bonus-damage: 6.0
@@ -48,6 +60,7 @@ witch:
   spell-cooldown-seconds: 20
   overchannel-backlash-chance-percent: 20
   overchannel-backlash-damage: 6.0
+  ring-forge-herb-cost: 3   # herbs needed to forge a Daylight Ring for a vampire (once Originals slots are full)
 
 items:
   daylight-ring-name: "Daylight Ring"
@@ -59,17 +72,41 @@ items:
   witch-herb-material: NETHER_WART
   witch-wand-material: BLAZE_ROD
 
-# Only used if a "Factions" plugin (e.g. SaberFactions) is detected on the server.
-# If it's missing, or the API doesn't match, this bridge disables itself and
-# logs a warning - the rest of MysticCraft works fine either way.
-factions-bridge:
-  auto-assign-faction-on-turn: true       # turning a player moves them into their race's faction
-  lock-faction-membership-by-race: true   # /f join is blocked into a race-locked faction if race doesn't match
-  race-factions:
-    VAMPIRE: "Vampires"
-    WEREWOLF: "Werewolves"
-    WITCH: "Witches"
-    # Leave a race out of this map (or blank) to not lock/auto-assign it.
-  majority-bonus:
-    enabled: true
-    threshold-percent: 70   # % of a faction's online members that must share a race to trigger the bonus
+
+# Native clan system - covens, packs, courts, orders and circles.
+# This replaces any external factions plugin; MysticCraft owns territory
+# itself so that race mechanics and land can actually interact.
+clans:
+  base-claim-limit: 10          # chunks a clan can hold at 1 member
+  claims-per-member: 5          # additional chunks per extra member
+  friendly-fire-disabled: true  # clan members and allies can't damage each other
+  territory-effects-enabled: true  # race-flavored buffs/penalties on clan ground
+
+# The three unique Progenitor titles. Each can be held by exactly one player,
+# ever. Claiming conditions are deliberately demanding - see README.
+progenitors:
+  enabled: true
+  immortal-requires-humanity-zero: true   # The Immortal is claimed by a vampire who hits 0 humanity and survives
+  first-wolf-requires-full-moons: 3       # The First Wolf is claimed after surviving N forced transformations
+  original-witch-requires-spells: 50      # The Original Witch is claimed after casting N spells
+
+  # Titles written for specific players. A reserved title can ONLY be claimed by
+  # the named player - anyone else who meets the condition is turned away, so the
+  # founding story can't be taken by a stranger in week one. When the named player
+  # claims it, they get a heavier "the name comes back to you" recognition instead
+  # of the standard announcement.
+  #
+  # Leave a value blank ("") to make that title first-come, first-served.
+  reserved:
+    THE_IMMORTAL: "Ace"                 # Akaios the Unburied
+    THE_ORIGINAL_WITCH: "Shadowphoenix" # Eldrun Skugga, the Ash-Mother
+    THE_FIRST_WOLF: "Loubuscus"         # Lupercus of the Seven Knives
+
+# Lore discovery and questlines. The codex starts locked and fills in as
+# players actually play - see README for the full discovery map.
+lore:
+  discovery-enabled: true
+  seed-books-in-loot: true            # lore books generate in natural structure chests
+  book-loot-chance-percent: 12.0      # chance per generated container
+  white-oak-discovery-enabled: true   # standing near pale oak reveals the Ash-Mother fragment
+  ambient-check-interval-ticks: 200   # how often passive discoveries are evaluated

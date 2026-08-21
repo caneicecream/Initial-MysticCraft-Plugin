@@ -24,6 +24,7 @@ public class MysticItems {
     public static final String TAG_STAKE = "stake";
     public static final String TAG_WITCH_HERB = "witch_herb";
     public static final String TAG_WITCH_WAND = "witch_wand";
+    public static final String TAG_WHITE_OAK_STAKE = "white_oak_stake";
 
     private final MysticCraft plugin;
     private final NamespacedKey key;
@@ -91,6 +92,19 @@ public class MysticItems {
                 "§5Grimoire Wand",
                 List.of("§7Channel your bloodline's power.", "§7Use /witch cast <spell> while holding this."));
         return item;
+    }
+
+    public ItemStack whiteOakStake() {
+        return build(Material.PALE_OAK_PLANKS, TAG_WHITE_OAK_STAKE,
+                "§f§lWhite Oak Stake",
+                List.of("§7Cut from the tree the Ash-Mother drew on.",
+                        "§4Kills any vampire permanently.",
+                        "§4Even one that shouldn't be killable.",
+                        "§8Consumed on use. There are only so many."));
+    }
+
+    public boolean isWhiteOakStake(ItemStack item) {
+        return hasTag(item, TAG_WHITE_OAK_STAKE);
     }
 
     public boolean hasTag(ItemStack item, String tag) {

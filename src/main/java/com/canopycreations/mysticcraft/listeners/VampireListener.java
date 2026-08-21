@@ -38,8 +38,14 @@ public class VampireListener implements Listener {
         if (daytime && exposed) {
             double damage = plugin.getConfig().getDouble("vampire.sunlight-damage-per-second", 4.0);
             player.damage(damage);
-            player.getWorld().playSound(player.getLocation(), Sound.ENTITY_GENERIC_BURN, 0.6f, 1.2f);
+            com.canopycreations.mysticcraft.util.Fx.sunlightBurn(player);
             player.sendActionBar("§4You're burning in the sunlight! Find shade or wear your ring.");
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.SAW_VAMPIRE_BURN);
+            for (Player near : player.getWorld().getPlayers()) {
+                if (!near.equals(player) && near.getLocation().distance(player.getLocation()) <= 16) {
+                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.SAW_VAMPIRE_BURN);
+                }
+            }
         }
     }
 
@@ -115,23 +121,69 @@ public class VampireListener implements Listener {
         if (!(event.getRightClicked() instanceof LivingEntity victim)) return;
         if (victim.getLocation().distance(vampire.getLocation()) > 3) return;
 
+        event.setCancelled(true);
+
+        // Both parties sneaking + target is a human player = blood-sharing ritual (turning), not feeding.
+        if (victim instanceof Player targetPlayer && targetPlayer.isSneaking()
+                && plugin.getRaceManager().getRace(targetPlayer) == Race.HUMAN) {
+            shareBlood(vampire, targetPlayer);
+            return;
+        }
+
         double healHearts = plugin.getConfig().getDouble("vampire.blood-heal-hearts", 4.0);
         int humanityCost = plugin.getConfig().getInt("vampire.blood-humanity-cost", 2);
 
-        double maxHealth = vampire.getAttribute(org.bukkit.attribute.Attribute.GENERIC_MAX_HEALTH).getValue();
+        double maxHealth = vampire.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
         vampire.setHealth(Math.min(maxHealth, vampire.getHealth() + healHearts * 2));
-        vampire.getWorld().playSound(vampire.getLocation(), Sound.ENTITY_GENERIC_DRINK, 1f, 0.6f);
+        com.canopycreations.mysticcraft.util.Fx.feeding(vampire, victim.getLocation());
         vampire.sendMessage("§4You feed, and feel the strength return to you.");
+        plugin.getQuestManager().progress(vampire, com.canopycreations.mysticcraft.quests.Questline.Objective.FEED_ONCE);
+        plugin.getCodexManager().discover(vampire, com.canopycreations.mysticcraft.lore.LoreFragment.THE_THIRST);
 
         if (victim instanceof Player victimPlayer) {
             victimPlayer.damage(2.0);
             victimPlayer.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 100, 0));
             victimPlayer.sendMessage("§4Something just fed on you...");
+            plugin.getCodexManager().discover(victimPlayer, com.canopycreations.mysticcraft.lore.LoreFragment.THE_THIRST);
+
+            // If this vampire is mid-transition, feeding on a human completes it.
+            if (data.isTransitioning() && plugin.getRaceManager().getRace(victimPlayer) == Race.HUMAN) {
+                completeTransition(vampire, data);
+            }
         } else {
             victim.damage(2.0);
         }
 
-        plugin.getHumanityManager().adjustHumanity(vampire, -humanityCost);
-        event.setCancelled(true);
+        if (!data.isTransitioning()) {
+            plugin.getHumanityManager().adjustHumanity(vampire, -humanityCost);
+        }
+    }
+
+    private void shareBlood(Player vampire, Player human) {
+        int windowMinutes = plugin.getConfig().getInt("vampire.turning.blood-window-minutes", 60);
+        PlayerData humanData = plugin.getRaceManager().getData(human);
+        humanData.setHasVampireBloodInSystem(true);
+        humanData.setVampireBloodExpiresAtMillis(System.currentTimeMillis() + windowMinutes * 60_000L);
+        plugin.getDataStore().save(humanData);
+
+        com.canopycreations.mysticcraft.util.Fx.bloodShared(vampire, human);
+        vampire.sendMessage("§4You share your blood. Their fate is their own now.");
+        plugin.getQuestManager().progress(vampire, com.canopycreations.mysticcraft.quests.Questline.Objective.TURN_SOMEONE);
+        human.sendMessage("§4§lYou taste blood not your own.");
+        human.sendMessage("§4A strange power lingers in your veins. If you die in the next " + windowMinutes
+                + " minutes, you won't stay dead - but you'll have to fight to survive what comes after.");
+    }
+
+    private void completeTransition(Player vampire, PlayerData data) {
+        data.setTransitioning(false);
+        int startHumanity = plugin.getConfig().getInt("vampire.humanity.start", 100);
+        data.setHumanity(startHumanity);
+        plugin.getDataStore().save(data);
+
+        com.canopycreations.mysticcraft.util.Fx.transitionComplete(vampire);
+        vampire.sendTitle("§4§lThe transition is complete", "§7You are a vampire now, fully and truly.", 10, 60, 20);
+        org.bukkit.Bukkit.broadcastMessage("§4" + vampire.getName() + " §7has completed the turning. A new vampire walks among us.");
+
+        plugin.getOriginalsManager().tryClaimOriginal(vampire);
     }
 }

@@ -47,6 +47,15 @@ public class DataStore {
             data.setTriggeredCurse(yml.getBoolean("hasTriggeredCurse", false));
             data.setLastRaceSwitchMillis(yml.getLong("lastRaceSwitchMillis", 0L));
             data.setLastShiftMillis(yml.getLong("lastShiftMillis", 0L));
+            data.setHasVampireBloodInSystem(yml.getBoolean("hasVampireBloodInSystem", false));
+            data.setVampireBloodExpiresAtMillis(yml.getLong("vampireBloodExpiresAtMillis", 0L));
+            data.setPendingTransition(yml.getBoolean("pendingTransition", false));
+            data.setTransitioning(yml.getBoolean("transitioning", false));
+            data.setTransitionDeadlineMillis(yml.getLong("transitionDeadlineMillis", 0L));
+            data.setOriginalVampire(yml.getBoolean("originalVampire", false));
+            data.setLatentWolfGene(yml.getBoolean("latentWolfGene", false));
+            data.setGeneRollDone(yml.getBoolean("geneRollDone", false));
+            data.setBloodline(com.canopycreations.mysticcraft.lore.Bloodline.fromString(yml.getString("bloodline", null)));
         }
         return data;
     }
@@ -61,6 +70,15 @@ public class DataStore {
         yml.set("hasTriggeredCurse", data.hasTriggeredCurse());
         yml.set("lastRaceSwitchMillis", data.getLastRaceSwitchMillis());
         yml.set("lastShiftMillis", data.getLastShiftMillis());
+        yml.set("hasVampireBloodInSystem", data.hasVampireBloodInSystem());
+        yml.set("vampireBloodExpiresAtMillis", data.getVampireBloodExpiresAtMillis());
+        yml.set("pendingTransition", data.isPendingTransition());
+        yml.set("transitioning", data.isTransitioning());
+        yml.set("transitionDeadlineMillis", data.getTransitionDeadlineMillis());
+        yml.set("originalVampire", data.isOriginalVampire());
+        yml.set("latentWolfGene", data.hasLatentWolfGene());
+        yml.set("geneRollDone", data.isGeneRollDone());
+        yml.set("bloodline", data.getBloodline() == null ? null : data.getBloodline().name());
         try {
             yml.save(file);
         } catch (IOException e) {

@@ -29,12 +29,12 @@ public class WitchCommand implements CommandExecutor {
             return true;
         }
         if (args.length == 0) {
-            player.sendMessage("§7Usage: /witch <cast|list> [spell]");
+            gestures(player);
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("list")) {
-            player.sendMessage("§5Known spells: §f" + String.join(", ", SpellManager.SPELLS));
+        if (args[0].equalsIgnoreCase("list") || args[0].equalsIgnoreCase("gestures")) {
+            gestures(player);
             return true;
         }
 
@@ -48,8 +48,29 @@ public class WitchCommand implements CommandExecutor {
             return true;
         }
 
-        player.sendMessage("§7Usage: /witch <cast|list> [spell]");
+        gestures(player);
         return true;
+    }
+
+    /**
+     * The gesture vocabulary. This is the real interface - the /witch cast
+     * command exists only as an accessibility fallback for players who can't
+     * comfortably perform the physical motions.
+     */
+    private void gestures(Player player) {
+        player.sendMessage("§8§m                                                ");
+        player.sendMessage("§5§lThe Craft");
+        player.sendMessage("§8Hold your Grimoire Wand. The motion is the spell.");
+        player.sendMessage("");
+        player.sendMessage("§7Raise it to the sky §8→ §aheal");
+        player.sendMessage("§7Kneel and touch the earth §8→ §dboundary");
+        player.sendMessage("§7Strike toward someone §8→ §btelekinesis");
+        player.sendMessage("§7Point at them, crouched §8→ §5pain");
+        player.sendMessage("§7Point at them, standing §8→ §6desiccate");
+        player.sendMessage("§7Kneel, wand raised §8→ §eforge a daylight ring");
+        player.sendMessage("");
+        player.sendMessage("§8Others can see you do this. Choose your moment.");
+        player.sendMessage("§8§m                                                ");
     }
 
     private LivingEntity getTargetedEntity(Player player) {

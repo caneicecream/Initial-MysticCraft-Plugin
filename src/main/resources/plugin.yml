@@ -1,10 +1,9 @@
 name: MysticCraft
 version: '1.0.0'
 main: com.canopycreations.mysticcraft.MysticCraft
-api-version: '1.21'
+api-version: '26.2'
 author: CanopyCreations
 description: Vampire Diaries-inspired supernatural races - Vampires, Werewolves, Witches
-softdepend: [Factions]
 
 commands:
   race:
@@ -21,7 +20,19 @@ commands:
     usage: /witch <cast|list> [spell]
   mystic:
     description: Admin commands for MysticCraft
-    usage: /mystic <reload|setrace|humanity|moon>
+    usage: /mystic <reload|setrace|humanity|moon|originals|bloodline|progenitor|keeper>
+  clan:
+    description: Found and manage a coven, pack, court or order
+    usage: /clan <create|invite|join|leave|claim|info|list|ally|enemy>
+    aliases: [c, faction, f]
+  lore:
+    description: Read the codex - the mythology of this world
+    usage: /lore [found|read|origins|progenitors|bloodlines|names|town]
+    aliases: [codex]
+  quest:
+    description: See where you are in your story
+    usage: /quest
+    aliases: [story, q]
 
 permissions:
   mysticcraft.admin:

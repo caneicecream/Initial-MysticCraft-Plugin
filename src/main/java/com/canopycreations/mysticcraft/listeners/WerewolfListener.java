@@ -23,6 +23,8 @@ public class WerewolfListener implements Listener {
 
     /** Tracks players currently suffering werewolf bite toxin: uuid -> expiry (millis). */
     private final Map<UUID, Long> toxinExpiry = new HashMap<>();
+    /** Which bloodline's venom is in them - determines damage profile. */
+    private final Map<UUID, com.canopycreations.mysticcraft.lore.Bloodline> toxinSource = new HashMap<>();
 
     public WerewolfListener(MysticCraft plugin) {
         this.plugin = plugin;
@@ -60,9 +62,19 @@ public class WerewolfListener implements Listener {
         if (attackerData.getRace() != Race.WEREWOLF || !attackerData.isShifted()) return;
         if (victimData.getRace() != Race.VAMPIRE) return;
 
-        int durationSeconds = plugin.getConfig().getInt("werewolf.bite-toxin-duration-seconds", 60);
+        com.canopycreations.mysticcraft.lore.Bloodline line = attackerData.getBloodline();
+        int durationSeconds = line != null
+                ? line.getVenomDurationSeconds()
+                : plugin.getConfig().getInt("werewolf.bite-toxin-duration-seconds", 60);
+
         toxinExpiry.put(victim.getUniqueId(), System.currentTimeMillis() + durationSeconds * 1000L);
-        victim.sendMessage("§6You've been bitten! The werewolf venom is already spreading - find a werewolf's blood to cure it.");
+        if (line != null) toxinSource.put(victim.getUniqueId(), line);
+        victim.sendMessage("§6You've been bitten! The venom is already spreading - find a werewolf's blood to cure it.");
+        plugin.getQuestManager().progress(attacker, com.canopycreations.mysticcraft.quests.Questline.Objective.VENOM_A_VAMPIRE);
+        com.canopycreations.mysticcraft.util.Fx.venomBite(attacker, victim);
+        if (line != null) {
+            victim.sendMessage("§8The fever has a particular character to it. Someone who knows the bloodlines might recognise it.");
+        }
     }
 
     /** Called once per second by MysticCraft's tick task. */
@@ -72,18 +84,25 @@ public class WerewolfListener implements Listener {
 
         if (System.currentTimeMillis() > expiry) {
             toxinExpiry.remove(player.getUniqueId());
+            toxinSource.remove(player.getUniqueId());
             player.sendMessage("§6The werewolf venom has run its course... you survived.");
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.SURVIVED_WOLF_BITE);
             return;
         }
 
-        double dmg = plugin.getConfig().getDouble("werewolf.bite-toxin-vampire-damage-per-second", 3.0);
+        com.canopycreations.mysticcraft.lore.Bloodline line = toxinSource.get(player.getUniqueId());
+        double dmg = line != null
+                ? line.getVenomDamagePerSecond()
+                : plugin.getConfig().getDouble("werewolf.bite-toxin-vampire-damage-per-second", 3.0);
         player.damage(dmg);
         player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 40, 0));
         player.sendActionBar("§6Werewolf venom burns in your veins...");
+        com.canopycreations.mysticcraft.util.Fx.venomTick(player);
     }
 
     /** A werewolf's blood cures the vampire bite toxin - drink via /vampire feed on a werewolf, or admin cure. */
     public void cureToxin(Player player) {
+        toxinSource.remove(player.getUniqueId());
         if (toxinExpiry.remove(player.getUniqueId()) != null) {
             player.sendMessage("§aThe werewolf blood burns through your system - the venom is cured.");
         }

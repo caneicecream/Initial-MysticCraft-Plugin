@@ -58,7 +58,14 @@ public class RaceCommand implements CommandExecutor {
         }
         Race race = Race.fromString(args[1]);
         if (race == null) {
-            player.sendMessage("§cUnknown race. Try human, vampire, werewolf, or witch.");
+            player.sendMessage("§cUnknown race. Try human, werewolf, or witch.");
+            return;
+        }
+        if (race == Race.VAMPIRE) {
+            player.sendMessage("§cVampires can't be self-selected. You have to be turned: find an existing vampire, "
+                    + "and both of you sneak + right-click each other. If you die before that blood wears off, "
+                    + "you'll rise as a vampire - but you'll have to feed on a human to complete the change, or "
+                    + "it's permanent in the worst way.");
             return;
         }
         if (!plugin.getRaceManager().canSwitchRace(player)) {

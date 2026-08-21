@@ -36,10 +36,18 @@ public class HumanityManager {
         int lowThreshold = plugin.getConfig().getInt("vampire.humanity.low-threshold", 30);
         if (before > lowThreshold && after <= lowThreshold) {
             player.sendMessage("§4Your humanity is slipping. You feel the ripper taking hold...");
+            plugin.getCodexManager().discover(player, com.canopycreations.mysticcraft.lore.LoreFragment.HUMANITY_DROPPED);
         }
         if (after == 0) {
             player.sendMessage("§4§lYou have switched off your humanity. Nothing holds you back now.");
             Bukkit.broadcastMessage("§4" + player.getName() + " has gone full ripper - humanity switch OFF.");
+
+            // Reaching zero humanity and surviving it is what makes The Immortal.
+            if (plugin.getConfig().getBoolean("progenitors.enabled", true)
+                    && plugin.getConfig().getBoolean("progenitors.immortal-requires-humanity-zero", true)) {
+                plugin.getProgenitorManager().claim(player,
+                        com.canopycreations.mysticcraft.lore.Progenitor.THE_IMMORTAL);
+            }
         }
         plugin.getDataStore().save(data);
     }

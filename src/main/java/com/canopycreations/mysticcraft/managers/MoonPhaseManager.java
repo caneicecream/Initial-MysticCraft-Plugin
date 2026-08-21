@@ -18,6 +18,7 @@ import org.bukkit.potion.PotionEffectType;
 public class MoonPhaseManager {
 
     private final MysticCraft plugin;
+    private final java.util.Map<java.util.UUID, Integer> forcedShiftCounts = new java.util.HashMap<>();
 
     public MoonPhaseManager(MysticCraft plugin) {
         this.plugin = plugin;
@@ -60,12 +61,31 @@ public class MoonPhaseManager {
         plugin.getDataStore().save(data);
 
         if (firstShift) {
-            player.sendMessage("§6§lYour bones are breaking. The change takes you for the first time - there is no fighting it.");
+            com.canopycreations.mysticcraft.util.Fx.transformation(player);
+            com.canopycreations.mysticcraft.util.Fx.howl(player);
+            player.sendTitle("§6§lThe change takes you", "§7There is no fighting it.", 10, 70, 20);
             player.addPotionEffect(new PotionEffect(PotionEffectType.BLINDNESS, 60, 0));
         } else {
-            player.sendMessage("§6The full moon calls. You feel the shift take hold - you have no control tonight.");
+            com.canopycreations.mysticcraft.util.Fx.transformation(player);
+            com.canopycreations.mysticcraft.util.Fx.howl(player);
+            player.sendTitle("§6The moon calls", "§7You have no control tonight.", 10, 60, 20);
+            for (Player near : player.getWorld().getPlayers()) {
+                if (!near.equals(player) && near.getLocation().distance(player.getLocation()) <= 24) {
+                    plugin.getCodexManager().discover(near, com.canopycreations.mysticcraft.lore.LoreFragment.NEAR_TRANSFORMATION);
+                }
+            }
         }
         Bukkit.broadcastMessage("§6" + player.getName() + " §7has been forced into wolf form by the full moon!");
+
+        // Surviving repeated forced changes is what makes The First Wolf.
+        if (plugin.getConfig().getBoolean("progenitors.enabled", true)) {
+            int required = plugin.getConfig().getInt("progenitors.first-wolf-requires-full-moons", 3);
+            forcedShiftCounts.merge(player.getUniqueId(), 1, Integer::sum);
+            if (forcedShiftCounts.get(player.getUniqueId()) >= required) {
+                plugin.getProgenitorManager().claim(player,
+                        com.canopycreations.mysticcraft.lore.Progenitor.THE_FIRST_WOLF);
+            }
+        }
     }
 
     /**
@@ -83,6 +103,8 @@ public class MoonPhaseManager {
                 plugin.getRaceManager().refreshAttributes(player);
                 plugin.getDataStore().save(data);
                 player.sendMessage("§6The sun rises. You return to human form, exhausted.");
+                plugin.getQuestManager().progress(player, com.canopycreations.mysticcraft.quests.Questline.Objective.SURVIVE_FULL_MOON);
+                plugin.getQuestManager().progress(player, com.canopycreations.mysticcraft.quests.Questline.Objective.MOONS_WITHOUT_KILL);
                 player.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, 1200, 0));
             }
         }

@@ -48,7 +48,17 @@ public class VampireCommand implements CommandExecutor {
 
     private void compel(Player vampire, PlayerData data, String[] args) {
         if (args.length < 3) {
-            vampire.sendMessage("§7Usage: /vampire compel <player> <suggestion...>");
+            vampire.sendMessage("§8§m                                                ");
+            vampire.sendMessage("§4§lCompulsion");
+            vampire.sendMessage("§7You don't need a command for this.");
+            vampire.sendMessage("");
+            vampire.sendMessage("§7Crouch. Get close. Look them in the eye —");
+            vampire.sendMessage("§7and they have to be looking back.");
+            vampire.sendMessage("§7Hold it, and they're yours.");
+            vampire.sendMessage("");
+            vampire.sendMessage("§8Vervain stops it cold. So does looking away.");
+            vampire.sendMessage("§8And anyone watching will see something pass between you.");
+            vampire.sendMessage("§8§m                                                ");
             return;
         }
         long cooldownMillis = plugin.getConfig().getInt("vampire.compulsion-cooldown-seconds", 90) * 1000L;
@@ -107,8 +117,14 @@ public class VampireCommand implements CommandExecutor {
 
     private void status(Player player, PlayerData data) {
         player.sendMessage("§7--- §4Vampire Status§7 ---");
+        if (data.isTransitioning()) {
+            long remainingMs = data.getTransitionDeadlineMillis() - System.currentTimeMillis();
+            long minutes = Math.max(0, remainingMs / 60_000L);
+            player.sendMessage("§4§lTransitioning - §7feed on a human within §4" + minutes + " minutes§7 or this is permanent.");
+        }
         player.sendMessage("§7Humanity: §f" + data.getHumanity() + "/100");
         player.sendMessage("§7Daylight Ring: " + (data.isDaylightRingEquipped() ? "§aEquipped" : "§cNot equipped"));
+        player.sendMessage("§7Original Vampire: " + (data.isOriginalVampire() ? "§6Yes" : "§7No"));
         boolean poisoned = plugin.getWerewolfListener().isPoisoned(player);
         player.sendMessage("§7Werewolf venom: " + (poisoned ? "§4Active - find a cure!" : "§aNone"));
     }
